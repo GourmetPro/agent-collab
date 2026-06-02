@@ -1,96 +1,108 @@
 ---
 name: agent-thread
 description: >
-  Use when you have produced a spec, plan, design doc, or PR in one agent
-  session and want a second agent session (Claude or Codex) to review or
-  discuss it, looping back and forth until resolved - instead of you manually
-  copy-pasting report files between two agents. Triggers on asks like "have
-  another agent review this", "get a second agent's opinion until we converge",
-  "I asked an agent to do X, they'll come back to you via Y", "run a review
-  loop between two sessions", "let codex and claude discuss this until done",
-  or wanting two open agent sessions to talk to each other without you
-  relaying. Also for any peer-to-peer turn-taking exchange between two agent
-  sessions on the same machine.
+  Use when you want one running agent session to collaborate with another
+  running agent session (any mix of Claude Code and Codex, same machine) by
+  taking turns through a shared channel until the work is resolved - instead of
+  you manually copy-pasting messages or report files between the two. Covers
+  many collaboration shapes: have a peer review a spec/plan/PR, debate a
+  decision (A vs B), consult a peer that has different tools/model/repo/web
+  access, delegate a scoped sub-task, pair (driver/navigator) on a working
+  tree, or brainstorm. Triggers on asks like "have another agent review this",
+  "get a second agent's opinion until we converge", "ask the other session
+  about X", "let codex and claude work this out", "I asked an agent to do X,
+  they'll come back to you via Y", or wanting two open sessions to talk without
+  you relaying.
 user-invocable: false
 ---
 
 # agent-thread
 
-Two agent sessions on the same machine (any mix of Claude Code and Codex) hold
-a turn-taking conversation through a shared on-disk thread, looping until one of
-them marks it resolved. The human kicks off each peer once, then stays out of
-the loop - no copy-pasting report paths between sessions.
+Talk to another running agent session. Two sessions on the same machine (any mix
+of Claude Code and Codex) hold a turn-taking conversation through a shared
+on-disk thread, looping until one of them marks it resolved. The human kicks off
+each peer once, then stays out of the loop - no copy-pasting messages between
+sessions.
 
 The conversation lives in plain files (`<git-root>/.agent-threads/<id>/`), driven
 by one zero-dependency CLI: `scripts/athread.mjs`. There is no server, daemon, or
 MCP. `wait` is the whole mechanism: it blocks until it is your turn, then prints
 the peer's latest message.
 
+The channel is **pattern-agnostic**. What differs between collaboration types is
+only two things: the opening message the initiator posts, and what "resolved"
+means. The mechanics below are identical for all of them.
+
 ## Your job (in order)
 
 1. Find the CLI: it is `scripts/athread.mjs` next to this file. Set
    `AT="<absolute path to scripts/athread.mjs>"` for the commands below.
-2. **Pick your role** from the request:
-   - You just produced an artifact and want it reviewed -> you are the **author**. Go to [Author recipe](#author-recipe).
-   - The human pasted a kickoff prompt asking you to review something -> you are the **reviewer**. That prompt already contains your loop; just follow it.
-   - Two peers are hashing out an open decision (no single author) -> [Discuss recipe](#discuss-recipe).
-3. Run your recipe's loop to convergence, honoring [escalation rules](#escalation--termination).
-4. When the thread resolves (or escalates), report the outcome to the human in one short summary.
+2. Decide whether you are **joining** or **initiating**:
+   - The human pasted a kickoff prompt -> you are **joining**. Follow that prompt;
+     your specific task is in the first message you `wait` for.
+   - You want a peer's help -> you are **initiating**. Pick a
+     [pattern](#collaboration-patterns) (or improvise) and run
+     [the loop](#running-a-collaboration-initiator).
+3. Loop to convergence, honoring the [escalation rules](#escalation--termination).
+4. When the thread resolves (or escalates), report the outcome to the human in
+   one short summary.
 
-## Author recipe
+## Collaboration patterns
 
-You wrote the spec/plan/PR; you want a peer to review it until there are no
-blocking issues left.
+Pick the row that fits, or improvise your own - the CLI does not care. Each
+pattern is just a way to fill in the opening post and the resolve condition.
 
-1. Start the thread (pick a short readable id, e.g. the artifact basename):
+| Pattern | Shape | The opening post asks for... | "Resolved" means... |
+|---|---|---|---|
+| **Review** | one leads, critical | "critique this artifact at /abs/path; post blocking issues" | no blocking issues remain |
+| **Debate / decide** | symmetric, critical | "argue this against me: option A vs B" | an agreed decision, or a crisp framed disagreement for the human |
+| **Consult** | one asks, informational | "here is my blocker / question; you have <tool/model/repo> I don't" | you got the answer you needed |
+| **Delegate** | one leads, generative | "do this scoped sub-task and report back" | the sub-task is delivered and integrated |
+| **Pair** (driver/navigator) | one edits, one steers | "watch my diffs in <path> and steer me turn by turn" | the change is done and the navigator signs off |
+| **Brainstorm** | symmetric, generative | "let's riff on ideas for X, build on each other" | a synthesized shortlist both peers back |
+
+Variants: **verify** is Review aimed at correctness/facts (the peer independently
+re-derives or re-runs your result instead of judging design taste);
+**contract negotiation** is Decide across two repos (e.g. a frontend session and
+a backend session settling an API shape, each session in its own working tree).
+
+The leverage of a *second running session* is usually one of: independent
+judgment (a fresh context sees what you can't), **different capabilities**
+(another model, different tools/MCPs, a different repo's working tree, web
+access), parallelism, or keeping two big jobs in separate context windows. If
+none of those apply, do it inline instead.
+
+## Running a collaboration (initiator)
+
+The loop is the same for every pattern; only your opening post changes.
+
+1. Start the thread (pick a short readable id; handles are free-form - use the
+   harness names `claude,codex` or roles `author,reviewer`):
    ```
    node "$AT" init --thread <id> --participants <you>,<peer>
    ```
-   Handles are free-form. Use the harness names if that is how the human thinks
-   (`claude,codex`), or roles (`author,reviewer`). `--round-cap N` defaults to 15.
-2. Post the opening turn - point at the artifact by absolute path and state what
-   you want:
+   `--round-cap N` defaults to 15.
+2. Post the opening turn. State the **pattern**, your role and the peer's role,
+   point at anything by **absolute path**, and say what **"resolved" looks like**:
    ```
    node "$AT" post --thread <id> --as <you> \
-     --body "I'm the author. Review the artifact at /abs/path. Post concrete blocking issues; resolve when none remain. Don't edit it yourself."
+     --body "Pattern: review. You are the reviewer. Critique the spec at /abs/path. Post concrete blocking issues; resolve when none remain. Don't edit it yourself."
    ```
 3. Hand the human a one-paste launcher for the other session:
    ```
-   node "$AT" kickoff --thread <id> --as <peer> --role reviewer
+   node "$AT" kickoff --thread <id> --as <peer> [--role "<short label>"]
    ```
    Print its output and tell the human: "Paste this into your other agent session."
-4. Wait for the reviewer (see [the wake mechanic](#the-wake-mechanic)):
+   (`--role` is an optional one-line hint; the real task is in your opening post.)
+4. Wait for the peer (see [the wake mechanic](#the-wake-mechanic)):
    ```
    node "$AT" wait --thread <id> --as <you>
    ```
-5. On each reviewer turn: address the findings by **actually revising the
-   artifact**, then post a short reply describing what changed (and any
-   reasoned pushback). Then `wait` again.
-6. Loop step 4-5 until the reviewer `resolve`s, the round cap trips, or `wait`
-   times out. Then summarize for the human.
-
-## Reviewer recipe
-
-Usually you arrive here because the human pasted a kickoff prompt - follow it.
-If you need to drive it yourself, the loop is:
-
-1. `node "$AT" wait --thread <id> --as <you>` - blocks until your turn, prints the latest message.
-2. (Re-)read the referenced artifact.
-3. Decide if blocking issues remain:
-   - yes -> `node "$AT" post --thread <id> --as <you> --body "<numbered, concrete findings>"`
-   - no  -> `node "$AT" resolve --thread <id> --as <you> --body "<one line: why it's clean now>"`
-4. If you resolved, stop. Otherwise `wait` again.
-
-Review only; do not edit the artifact. Keep each turn concrete and brief - the
-author needs to act on it, not parse an essay.
-
-## Discuss recipe
-
-Symmetric variant for two peers hashing out a decision with no single author
-(e.g. "should we use approach A or B?"). Same loop, but **either** peer may
-`resolve` once they agree, and the resolve body states the agreed conclusion.
-Start it exactly like the author recipe, but the opening post asks a question
-instead of requesting a review.
+5. On each peer turn: do your part (revise the artifact, answer, integrate the
+   sub-task, react to the idea...), then `post` your reply - or `resolve` if the
+   shared goal is met. Then `wait` again.
+6. Loop step 4-5 until the thread resolves, the round cap trips, or `wait` times
+   out. Then summarize for the human.
 
 ## The wake mechanic
 
@@ -113,8 +125,8 @@ Pull the human back in (stop looping, summarize) when any of these happen:
 
 | Condition | Signal | What to do |
 |---|---|---|
-| Converged | a peer ran `resolve` (`wait` prints `status=resolved`) | Summarize the outcome and the final artifact state. |
-| Stuck in disagreement | round count reaches `round_cap` (`wait` prints `ROUND CAP reached`) | Stop. Summarize the open disagreement and your recommendation; let the human decide. |
+| Converged | a peer ran `resolve` (`wait` prints `status=resolved`) | Summarize the outcome and the final state. |
+| Stuck | round count reaches `round_cap` (`wait` prints `ROUND CAP reached`) | Stop. Summarize the open disagreement and your recommendation; let the human decide. |
 | Peer went quiet | `wait` exits non-zero (timeout) | Stop. Tell the human the peer stalled; offer to resume. |
 
 Never loop silently past the cap, and never invent a resolution the peer did not
@@ -133,15 +145,15 @@ All commands take `--thread <id>`. The thread root is `$ATHREAD_DIR`, else
 | `wait --thread T --as W [--timeout S] [--interval S]` | Block until your turn or resolved; print latest. Exit 2 on timeout. |
 | `read --thread T` | Print the whole transcript. |
 | `status --thread T` | Print meta + round count as JSON. |
-| `kickoff --thread T --as W --role reviewer\|author` | Emit a self-contained paste-prompt to launch the other peer. |
+| `kickoff --thread T --as W [--role "label"]` | Emit a self-contained paste-prompt to launch the other peer. |
 
 `--body-file` and piped stdin both work for long bodies, so you never have to
-cram a multi-paragraph review onto one shell line.
+cram a multi-paragraph turn onto one shell line.
 
 ## When NOT to use
 
-- **One session can do it alone.** If you just want a self-review pass, do it
-  inline; do not spin up a second agent.
+- **One session can do it alone.** If none of the leverage reasons above apply,
+  do the work inline; do not spin up a second agent for ceremony.
 - **The two agents are on different machines.** This channel is the local
   filesystem. Cross-machine needs a different transport (out of scope).
 - **More than two participants.** The turn model is strictly two peers.

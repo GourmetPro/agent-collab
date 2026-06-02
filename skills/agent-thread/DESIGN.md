@@ -55,6 +55,22 @@ record.
   the absolute script path and thread baked in) that the human pastes into the
   other session to launch the peer. The protocol text lives in one place.
 
+## Collaboration patterns
+
+The channel is pattern-agnostic: a turn-taking text loop between two peers. What
+differs between collaboration types is only (a) the opening message the
+initiator posts and (b) what "resolved" means - so the CLI and `kickoff` stay
+generic, and the SKILL teaches patterns as fill-in-the-blanks. Review was the
+motivating case; the named recipes are review, debate/decide, consult (leans on
+a peer's *different capabilities* - model, tools, repo, web), delegate, pair
+(driver/navigator), and brainstorm, with verify and cross-repo contract
+negotiation as variants. Agents may improvise patterns; nothing in the protocol
+constrains them to the named set.
+
+The leverage of a second running session is one of: independent judgment,
+different capabilities, parallelism, or separate context windows. When none
+applies, the work should stay inline rather than open a thread.
+
 ## Termination & escalation
 
 The human is pulled back in only on: `resolve` (converged), `round_cap` reached

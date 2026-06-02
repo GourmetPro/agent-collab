@@ -10,10 +10,12 @@ Auto-applied when relevant to the current task.
 ### `agent-thread`
 
 Let two already-running agent sessions (any mix of Claude Code and Codex, same
-machine) review or discuss work by taking turns through a shared on-disk thread,
-looping until resolved - so you stop copy-pasting report files between two
-agents. Triggers whenever you want a second agent to review a spec/plan/PR until
-it converges, or want two open sessions to talk without you relaying.
+machine) collaborate by taking turns through a shared on-disk thread, looping
+until resolved - so you stop copy-pasting messages between two agents. The
+channel is pattern-agnostic; it covers review, debate/decide, consult (a peer
+with different tools/model/repo), delegate a sub-task, pair (driver/navigator),
+and brainstorm. Triggers whenever you want a second agent to weigh in until you
+converge, or want two open sessions to talk without you relaying.
 
 - [SKILL.md](./skills/agent-thread/SKILL.md)
 - [Design notes](./skills/agent-thread/DESIGN.md)
@@ -39,9 +41,14 @@ Background skills auto-trigger from natural-language asks. For example:
 > I just wrote this spec. Have another agent review it until there are no
 > blocking issues left, and come back to me when it's resolved.
 
-The `agent-thread` skill activates, opens a thread, posts the artifact, and
-hands you a one-paste launcher for your second session. From there the two
-agents loop on their own.
+or
+
+> Ask my other session (it has the backend repo open) what shape this API
+> should be, and settle it with them.
+
+The `agent-thread` skill activates, opens a thread, posts the opening message,
+and hands you a one-paste launcher for your second session. From there the two
+agents loop on their own until resolved.
 
 ## Contributing
 

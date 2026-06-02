@@ -119,17 +119,14 @@ function printLatest(i) {
   console.log(fs.readFileSync(path.join(dir(i), f), 'utf8').trimEnd());
 }
 
-function kickoffPrompt({ role, handle, peer, threadId }) {
-  const r = role.toLowerCase();
-  const act = r === 'reviewer'
-    ? `If blocking issues remain:\n       node "$AT" post    --thread $T --as ${handle} --body "<numbered, concrete findings>"\n     If none remain:\n       node "$AT" resolve --thread $T --as ${handle} --body "<one line: why it is clean now>"`
-    : `Revise the artifact to address the findings, then:\n       node "$AT" post --thread $T --as ${handle} --body "<what you changed / any pushback>"`;
-  const step2 = r === 'reviewer'
-    ? 'If the message references an artifact path, (re-)read that file.'
-    : "Read the reviewer's findings.";
-  const onlyNote = r === 'reviewer' ? 'Review only - do NOT edit the artifact yourself. ' : '';
-  return `You are the ${role.toUpperCase()} peer ("${handle}") in an agent-thread loop with peer "${peer}".
-Communicate ONLY through the shared file thread, using this zero-dep Node CLI. Loop until the thread is resolved.
+// Pattern-agnostic: the peer's specific job arrives in the first message it
+// waits for. This prompt only teaches the mechanics + the loop. An optional
+// freeform --role label (e.g. "reviewer", "backend API owner", "navigator")
+// is surfaced as a one-line hint.
+function kickoffPrompt({ handle, peer, threadId, role }) {
+  const roleLine = role ? `Your role: ${role}.\n` : '';
+  return `You are "${handle}", collaborating with peer "${peer}" through a shared agent-thread.
+${roleLine}Communicate ONLY through the thread, using this zero-dep Node CLI. Loop until the thread is resolved.
 
   AT=${SELF}
   export ATHREAD_DIR=${root}
@@ -137,12 +134,15 @@ Communicate ONLY through the shared file thread, using this zero-dep Node CLI. L
 
 Loop:
   1. node "$AT" wait --thread $T --as ${handle} --timeout 1800 --interval 3
-     (blocks until it is your turn, then prints the latest message + round/cap)
-  2. ${step2}
-  3. ${act}
+     (blocks until it is your turn, then prints the peer's latest message + round/cap)
+  2. Do your part of what the message asks. Read or inspect anything it references (files, paths, the working tree).
+  3. Reply with your turn:
+       node "$AT" post --thread $T --as ${handle} --body "<your turn>"
+     When the shared goal is met, end the thread instead of posting:
+       node "$AT" resolve --thread $T --as ${handle} --body "<the outcome>"
   4. If the thread is resolved, STOP. Otherwise repeat from step 1.
 
-${onlyNote}Keep each turn concrete and brief. If you hit the round cap or a wait times out, stop and tell the human.`;
+Your specific task and goal are in the first message you receive. Keep each turn concrete and brief. If you hit the round cap or a wait times out, stop and tell the human.`;
 }
 
 async function main() {
@@ -175,8 +175,8 @@ async function main() {
     const m = readMeta(id);
     const handle = a.as || m.participants[1];
     const peer = otherOf(m, handle);
-    const role = a.role || (handle === m.participants[0] ? 'author' : 'reviewer');
-    console.log(kickoffPrompt({ role, handle, peer, threadId: id }));
+    const role = typeof a.role === 'string' ? a.role : '';
+    console.log(kickoffPrompt({ handle, peer, threadId: id, role }));
   } else if (cmd === 'wait') {
     const who = a.as;
     if (!who) throw new Error('athread: --as <handle> is required');
