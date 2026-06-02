@@ -24,10 +24,11 @@ on-disk thread, looping until one of them marks it resolved. The human kicks off
 each peer once, then stays out of the loop - no copy-pasting messages between
 sessions.
 
-The conversation lives in plain files (`<git-root>/.agent-threads/<id>/`), driven
-by one zero-dependency CLI: `scripts/athread.mjs`. There is no server, daemon, or
-MCP. `wait` is the whole mechanism: it blocks until it is your turn, then prints
-the peer's latest message.
+The conversation lives in plain files (`~/.agent-threads/<id>/` by default -
+outside any repo, so threads are never git-tracked; override with `$ATHREAD_DIR`),
+driven by one zero-dependency CLI: `scripts/athread.mjs`. There is no server,
+daemon, or MCP. `wait` is the whole mechanism: it blocks until it is your turn,
+then prints the peer's latest message.
 
 The channel is **pattern-agnostic**. What differs between collaboration types is
 only two things: the opening message the initiator posts, and what "resolved"
@@ -115,11 +116,22 @@ depends on your harness:
   re-invokes you when it exits, so you are woken on the peer's turn without
   burning a foreground turn polling. When notified, read the command's output
   file, act, post, and background another `wait`.
-- **Codex / other:** run `wait` inline. It blocks the current turn until the
-  peer replies, then your turn continues. Loop normally.
+- **Codex / other:** run `wait` as a foreground command in the current turn.
+  Codex has no auto-wake, so keep the turn alive and let `wait` block until it
+  prints a turn (it may show as a running/background terminal - that is the
+  foreground wait, not a notification). Do not shell-background `wait` with `&`
+  (it can orphan the wait and lose the printed turn). If the terminal is reaped,
+  just re-run the same `wait`.
 
 Either way, after you `post`, the turn is the peer's; your next `wait` returns
 when they hand it back.
+
+For an **ongoing, multi-topic collaboration**, create the thread with
+`init --session`: the peer's kickoff then uses `wait --follow` (waits
+indefinitely across idle gaps, with a periodic stderr heartbeat) and the round
+cap is unlimited. Keep one session thread and treat each new topic as another
+turn; `resolve` only when the whole collaboration is done. Do not open a fresh
+thread (and re-paste a launcher) per topic - that ends the peer's loop.
 
 ## Escalation - termination
 
@@ -137,14 +149,14 @@ agree to.
 ## CLI reference
 
 All commands take `--thread <id>`. The thread root is `$ATHREAD_DIR`, else
-`<git-root>/.agent-threads/`.
+`~/.agent-threads/` (outside any repo, so threads are never git-tracked).
 
 | Command | Purpose |
 |---|---|
-| `init --thread T --participants a,b [--round-cap N] [--turn a] [--force]` | Create a thread (exactly two distinct handles). Fails if `T` already exists unless `--force`, which resets it and clears old messages. |
+| `init --thread T --participants a,b [--round-cap N] [--turn a] [--session] [--force]` | Create a thread (exactly two distinct handles). `--session` = unlimited round cap + `wait --follow` in the kickoff, for ongoing multi-topic channels. Fails if `T` already exists unless `--force`, which resets it and clears old messages. |
 | `post --thread T --as W (--body "..." \| --body-file F) [--force]` | Add your turn; flips the turn to the peer. Rejected unless it is your turn (`--force` overrides). |
 | `resolve --thread T --as W [--body "..."] [--force]` | Close the thread (no more posts allowed). Same turn rule as `post`. |
-| `wait --thread T --as W [--timeout S] [--interval S]` | Block until your turn or resolved; print latest. Exit 2 on timeout. |
+| `wait --thread T --as W [--timeout S] [--interval S] [--follow]` | Block until your turn or resolved; print latest. Exit 2 on timeout, unless `--follow`, which never gives up (prints a stderr heartbeat and keeps waiting) - for session threads. |
 | `read --thread T` | Print the whole transcript. |
 | `status --thread T` | Print meta + round count as JSON. |
 | `kickoff --thread T --as W [--role "label"]` | Emit a self-contained paste-prompt to launch the other peer. |

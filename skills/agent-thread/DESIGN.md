@@ -27,16 +27,21 @@ skills/agent-thread/
 
 ## Channel
 
-A thread is a directory, `<git-root>/.agent-threads/<id>/` (override with
+A thread is a directory, `~/.agent-threads/<id>/` by default (override with
 `$ATHREAD_DIR`):
 
-- `meta.json` - `{ participants:[a,b], turn, status, round_cap, created, updated }`
+- `meta.json` - `{ participants:[a,b], turn, status, session, round_cap, created, updated }`
 - `NNNN.<handle>.md` - append-only messages, one per turn, with an HTML-comment
   header (`from`/`to`/`round`/`ts`, plus `resolve` on the closing message).
 
-Git-root-relative so both peers find the same thread from any subdirectory of
-the repo they are working in. Threads are scratch (gitignored), not a system of
-record.
+The root is **outside any repo** so threads (scratch, not a system of record) are
+never git-tracked. An earlier design put them at `<git-root>/.agent-threads/`,
+but that pollutes `git status` in every consuming repo; the home default avoids
+that and survives reboots/temp-sweeps (which matters for persistent sessions),
+while the system temp dir would not. `init` also drops a self-ignoring
+`.gitignore` (`*`) in the root as insurance for anyone who overrides `$ATHREAD_DIR`
+into a repo. The kickoff bakes the absolute root in, so both peers still
+rendezvous regardless of where it lives.
 
 ## Protocol
 
@@ -81,6 +86,21 @@ The human is pulled back in only on: `resolve` (converged), `round_cap` reached
 stalled). The loop never continues silently past the cap and never fabricates a
 resolution the peer did not agree to.
 
+## Persistent sessions
+
+A bounded task resolves and the peer stops. But for an ongoing, multi-topic
+collaboration, resolving each sub-topic ended the peer's loop and forced the
+human to re-paste a launcher every time. `init --session` makes a durable channel
+the easy path: unlimited round cap, and the kickoff emits `wait --follow`, which
+never exits on timeout - it keeps polling and prints a periodic stderr heartbeat
+so the terminal is visibly alive. The orchestrator keeps one session thread and
+treats each topic as another turn; `resolve` is the single explicit "session
+over" signal. Persistence is implemented as repeated bounded waits (heartbeat
+window preserved), not one unbounded sleep, per Codex's harness note that an
+indefinitely-open terminal is not independently resumable across sleep/cleanup.
+A "lobby" thread (peer awaits the next thread after a resolve) was considered and
+deferred - a persistent thread with explicit resolve covers the need.
+
 ## Validation
 
 The core - cross-harness rendezvous through the file channel - was proven with a
@@ -102,6 +122,11 @@ Codex resolved - with zero human relaying after the initial paste. The CLI
 ## Possible future hardening
 
 - Richer `status` / a `list` command across all threads.
-- Optional `--watch` push via filesystem events instead of polling.
+- **fs.watch as an optional accelerator, not a replacement** (Codex's verdict):
+  events coalesce/miss, are weak on network/virtual filesystems, and can fire
+  before `meta.json` is fully written. A robust version would run the same turn
+  check on startup, on fs.watch events, *and* on the periodic poll as fallback.
+  Given a 3s poll has negligible cost, only worth adding if near-instant wake
+  justifies the extra code and tests - deferred for now.
 - A second sibling skill for >2 participants or cross-machine, if a real need
   appears.

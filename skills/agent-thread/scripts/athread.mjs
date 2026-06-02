@@ -14,25 +14,18 @@
 // (pass --force to override, e.g. to recover a stuck thread).
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
 const SELF = path.resolve(process.argv[1]);
 const SAFE = /^[A-Za-z0-9._-]+$/; // thread ids and handles
 
-function gitRootOrCwd() {
-  let dir = process.cwd();
-  for (;;) {
-    if (fs.existsSync(path.join(dir, '.git'))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) return process.cwd();
-    dir = parent;
-  }
-}
-
+// Threads live OUTSIDE any repo by default, so they are never tracked by git.
+// Override with $ATHREAD_DIR (e.g. point it at a repo or the system temp dir).
 const root = process.env.ATHREAD_DIR
   ? path.resolve(process.env.ATHREAD_DIR)
-  : path.join(gitRootOrCwd(), '.agent-threads');
+  : path.join(os.homedir(), '.agent-threads');
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -156,7 +149,7 @@ function printLatest(i) {
 // freeform --role label (e.g. "reviewer", "backend API owner", "navigator")
 // is surfaced as a one-line hint. All shell-interpolated values are quoted so
 // a path with spaces or shell metacharacters cannot break the one-paste launcher.
-function kickoffPrompt({ handle, peer, threadId, role }) {
+function kickoffPrompt({ handle, peer, threadId, role, session }) {
   const roleLine = role ? `Your collaboration role: ${role}.\n` : '';
   const AT = shq(SELF);
   const DIR = shq(root);
@@ -165,9 +158,25 @@ function kickoffPrompt({ handle, peer, threadId, role }) {
   const skillPath = path.resolve(path.dirname(SELF), '..', 'SKILL.md');
   const skillLine = 'If an "agent-thread" skill is available in your environment, load it now for the full protocol (collaboration patterns, escalation rules).'
     + (fs.existsSync(skillPath) ? ` If you can read local files, its entrypoint is: ${skillPath}` : '');
+  const loopVerb = session
+    ? 'This is an ongoing session: keep looping until the peer resolves the thread or tells you the session is over.'
+    : 'Loop until the thread is resolved.';
+  const framing = session
+    ? '\nOngoing session: reply one turn at a time and keep waiting between turns. Do NOT resolve until the peer says the session is over.\n'
+    : '';
+  const waitLine = session
+    ? `node "$AT" wait --thread "$T" --as ${H} --follow --interval 3\n     (waits until it is your turn, then prints the peer's latest message; --follow keeps waiting across idle gaps and prints a heartbeat to stderr)`
+    : `node "$AT" wait --thread "$T" --as ${H} --timeout 1800 --interval 3\n     (blocks until it is your turn, then prints the peer's latest message + round/cap)`;
+  const replyLine = session
+    ? `node "$AT" post --thread "$T" --as ${H} --body "<your turn>"\n     Then go back to waiting. Do NOT resolve unless the peer says the session is over.`
+    : `node "$AT" post --thread "$T" --as ${H} --body "<your turn>"\n     When the shared goal is met, end the thread instead of posting:\n       node "$AT" resolve --thread "$T" --as ${H} --body "<the outcome>"`;
+  const step4 = session ? 'Repeat from step 1.' : 'If the thread is resolved, STOP. Otherwise repeat from step 1.';
+  const footer = session
+    ? 'Your specific task is in the first message you receive. Keep each turn concrete and brief. `wait --follow` keeps waiting across idle gaps; if your terminal is reaped, just re-run the same wait command. Stop only when the peer resolves the thread.'
+    : 'Your specific task and goal are in the first message you receive. Keep each turn concrete and brief. If you hit the round cap or a wait times out, stop and tell the human.';
   return `You are joining a shared agent-thread. Your thread handle is "${handle}" (use this exact value for --as); the peer's handle is "${peer}".
-${roleLine}Communicate ONLY through the thread, using this zero-dep Node CLI. Loop until the thread is resolved.
-
+${roleLine}Communicate ONLY through the thread, using this zero-dep Node CLI. ${loopVerb}
+${framing}
 ${skillLine}
 Then follow the concrete loop below; it has the exact CLI path, thread root, thread id, and --as handle for this collaboration.
 
@@ -176,16 +185,13 @@ Then follow the concrete loop below; it has the exact CLI path, thread root, thr
   T=${T}
 
 Loop:
-  1. node "$AT" wait --thread "$T" --as ${H} --timeout 1800 --interval 3
-     (blocks until it is your turn, then prints the peer's latest message + round/cap)
+  1. ${waitLine}
   2. Do your part of what the message asks. Read or inspect anything it references (files, paths, the working tree).
   3. Reply with your turn:
-       node "$AT" post --thread "$T" --as ${H} --body "<your turn>"
-     When the shared goal is met, end the thread instead of posting:
-       node "$AT" resolve --thread "$T" --as ${H} --body "<the outcome>"
-  4. If the thread is resolved, STOP. Otherwise repeat from step 1.
+       ${replyLine}
+  4. ${step4}
 
-Your specific task and goal are in the first message you receive. Keep each turn concrete and brief. If you hit the round cap or a wait times out, stop and tell the human.`;
+${footer}`;
 }
 
 async function main() {
@@ -204,12 +210,17 @@ async function main() {
     if (!participants.includes(turn)) {
       throw new Error(`athread: --turn "${turn}" is not one of the participants`);
     }
-    const roundCap = a['round-cap'] === undefined ? 15 : posNum(a['round-cap'], 'round-cap', { int: true });
+    const session = !!a.session;
+    const roundCap = a['round-cap'] !== undefined
+      ? posNum(a['round-cap'], 'round-cap', { int: true })
+      : (session ? null : 15); // sessions are unlimited by default
     const exists = fs.existsSync(metaPath(id));
     if (exists && !a.force) {
       throw new Error(`athread: thread ${id} already exists; pass --force to reset it`);
     }
     fs.mkdirSync(dir(id), { recursive: true });
+    // belt-and-suspenders: if the root ever lands inside a repo, self-ignore it
+    try { fs.writeFileSync(path.join(root, '.gitignore'), '*\n', { flag: 'wx' }); } catch { /* already there */ }
     if (exists && a.force) {
       for (const f of msgFiles(id)) fs.rmSync(path.join(dir(id), f));
       try { fs.rmdirSync(path.join(dir(id), '.lock')); } catch { /* ignore */ }
@@ -219,6 +230,7 @@ async function main() {
       participants,
       turn,
       status: 'open',
+      session,
       round_cap: roundCap,
       created: nowIso(),
     });
@@ -248,7 +260,7 @@ async function main() {
     }
     const peer = otherOf(m, handle);
     const role = typeof a.role === 'string' ? a.role : '';
-    console.log(kickoffPrompt({ handle, peer, threadId: id, role }));
+    console.log(kickoffPrompt({ handle, peer, threadId: id, role, session: !!m.session }));
   } else if (cmd === 'wait') {
     assertSafeId(id);
     const who = assertSafeHandle(a.as);
@@ -256,9 +268,11 @@ async function main() {
     if (!m0.participants.includes(who)) {
       throw new Error(`athread: "${who}" is not a participant of ${id} (${m0.participants.join(', ')})`);
     }
+    const follow = !!a.follow; // never give up on timeout; persist across idle gaps
     const timeout = (a.timeout === undefined ? 1800 : posNum(a.timeout, 'timeout')) * 1000;
     const interval = (a.interval === undefined ? 3 : posNum(a.interval, 'interval')) * 1000;
     const start = Date.now();
+    let windowStart = Date.now();
     for (;;) {
       const m = readMeta(id);
       const all = msgFiles(id);
@@ -270,13 +284,20 @@ async function main() {
       if (m.turn === who && all.length) {
         printLatest(id);
         const round = all.length;
-        const capped = round >= m.round_cap;
-        console.log(`\n[athread] your turn (round ${round}, cap ${m.round_cap})${capped ? ' -- ROUND CAP reached: stop and escalate to the human' : ''}`);
+        const capped = m.round_cap != null && round >= m.round_cap;
+        const capLabel = m.round_cap == null ? 'unlimited' : m.round_cap;
+        console.log(`\n[athread] your turn (round ${round}, cap ${capLabel})${capped ? ' -- ROUND CAP reached: stop and escalate to the human' : ''}`);
         return;
       }
-      if (Date.now() - start > timeout) {
-        console.error(`[athread] wait timed out after ${timeout / 1000}s -- peer went quiet; escalate to the human`);
-        process.exit(2);
+      if (Date.now() - windowStart > timeout) {
+        if (follow) {
+          const mins = Math.round((Date.now() - start) / 60000);
+          process.stderr.write(`[athread] still waiting on ${id} as ${who} (${mins}m elapsed)\n`);
+          windowStart = Date.now();
+        } else {
+          console.error(`[athread] wait timed out after ${timeout / 1000}s -- peer went quiet; escalate to the human`);
+          process.exit(2);
+        }
       }
       await sleep(interval);
     }

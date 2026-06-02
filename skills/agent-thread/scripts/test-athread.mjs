@@ -154,6 +154,43 @@ const SPACE = fs.mkdtempSync(path.join(os.tmpdir(), 'athread test ')); // note t
 }
 fs.rmSync(SPACE, { recursive: true, force: true });
 
+// --- git hygiene: the thread root self-ignores so it is never tracked ---
+check('init: writes a self-ignoring .gitignore in the thread root',
+  fs.existsSync(path.join(TMP, '.gitignore')) && fs.readFileSync(path.join(TMP, '.gitignore'), 'utf8').trim() === '*');
+
+// --- sessions: unlimited cap + session marker ---
+const SESS = 'sess';
+await run(['init', '--thread', SESS, '--participants', 'a,b', '--session']);
+check('init --session: marks the thread as a session', meta(SESS).session === true);
+check('init --session: round cap is unlimited (null)', meta(SESS).round_cap === null);
+await run(['post', '--thread', SESS, '--as', 'a', '--body', 'hi']);
+const sw = await run(['wait', '--thread', SESS, '--as', 'b', '--timeout', '2']);
+check('wait: session thread reports cap unlimited, never ROUND CAP', /cap unlimited/.test(sw.out) && !/ROUND CAP/.test(sw.out));
+
+// --- wait --follow: survives the timeout window instead of exiting ---
+const SF = 'follow';
+await run(['init', '--thread', SF, '--participants', 'a,b']);
+const followP = new Promise((resolve) => {
+  const p = spawn('node', [AT, 'wait', '--thread', SF, '--as', 'b', '--follow', '--timeout', '1', '--interval', '1'], { env });
+  let out = '', err = '';
+  p.stdout.on('data', (d) => (out += d));
+  p.stderr.on('data', (d) => (err += d));
+  p.on('close', (code) => resolve({ code, out, err }));
+});
+await new Promise((r) => setTimeout(r, 2500)); // cross at least one timeout window
+await run(['post', '--thread', SF, '--as', 'a', '--body', 'late turn']);
+const fr = await followP;
+check('wait --follow: does not exit on timeout, returns on the turn', fr.code === 0 && /your turn/.test(fr.out));
+check('wait --follow: emits a heartbeat to stderr while waiting', /still waiting/.test(fr.err));
+
+// --- kickoff is session-aware ---
+const koS = await run(['kickoff', '--thread', SESS, '--as', 'b']);
+check('kickoff (session): wait uses --follow', /wait --thread "\$T" --as 'b' --follow/.test(koS.out));
+check('kickoff (session): frames an ongoing session', /ongoing session/i.test(koS.out));
+await run(['init', '--thread', 'knorm', '--participants', 'a,b']);
+const koN = await run(['kickoff', '--thread', 'knorm', '--as', 'b']);
+check('kickoff (non-session): uses --timeout, not --follow', /--timeout 1800/.test(koN.out) && !/--follow/.test(koN.out));
+
 fs.rmSync(TMP, { recursive: true, force: true });
 if (failures) { console.error(`\n${failures} check(s) failed`); process.exit(1); }
 console.log('\nall checks passed');
