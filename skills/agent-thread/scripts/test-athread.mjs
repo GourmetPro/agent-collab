@@ -22,6 +22,13 @@ function run(args) {
     p.on('error', reject);
   });
 }
+const runIn = (dirEnv, args) => new Promise((resolve) => {
+  const p = spawn('node', [AT, ...args], { env: { ...process.env, ATHREAD_DIR: dirEnv } });
+  let out = '', err = '';
+  p.stdout.on('data', (d) => (out += d));
+  p.stderr.on('data', (d) => (err += d));
+  p.on('close', (code) => resolve({ code, out, err }));
+});
 const meta = (t) => JSON.parse(fs.readFileSync(path.join(TMP, t, 'meta.json'), 'utf8'));
 const indices = (t) => fs.readdirSync(path.join(TMP, t)).filter((f) => /^\d{4}\./.test(f)).sort().map((f) => f.slice(0, 4));
 
@@ -154,15 +161,21 @@ const SPACE = fs.mkdtempSync(path.join(os.tmpdir(), 'athread test ')); // note t
 }
 fs.rmSync(SPACE, { recursive: true, force: true });
 
-// --- git hygiene: the thread root self-ignores so it is never tracked ---
-check('init: writes a self-ignoring .gitignore in the thread root',
-  fs.existsSync(path.join(TMP, '.gitignore')) && fs.readFileSync(path.join(TMP, '.gitignore'), 'utf8').trim() === '*');
+// --- git hygiene: self-ignore a dedicated `.agent-threads` root, never an arbitrary dir ---
+const GIROOT = path.join(TMP, '.agent-threads');
+await runIn(GIROOT, ['init', '--thread', 'g', '--participants', 'a,b']);
+check('init: self-ignores a dedicated .agent-threads root',
+  fs.existsSync(path.join(GIROOT, '.gitignore')) && fs.readFileSync(path.join(GIROOT, '.gitignore'), 'utf8').trim() === '*');
+check('init: does NOT write a .gitignore into an arbitrary $ATHREAD_DIR (would clobber a repo)',
+  !fs.existsSync(path.join(TMP, '.gitignore')));
 
 // --- sessions: unlimited cap + session marker ---
 const SESS = 'sess';
 await run(['init', '--thread', SESS, '--participants', 'a,b', '--session']);
 check('init --session: marks the thread as a session', meta(SESS).session === true);
 check('init --session: round cap is unlimited (null)', meta(SESS).round_cap === null);
+const sessCap = await run(['init', '--thread', 'sc', '--participants', 'a,b', '--session', '--round-cap', '5']);
+check('init: rejects --session combined with --round-cap', sessCap.code === 1 && /--session/.test(sessCap.err));
 await run(['post', '--thread', SESS, '--as', 'a', '--body', 'hi']);
 const sw = await run(['wait', '--thread', SESS, '--as', 'b', '--timeout', '2']);
 check('wait: session thread reports cap unlimited, never ROUND CAP', /cap unlimited/.test(sw.out) && !/ROUND CAP/.test(sw.out));

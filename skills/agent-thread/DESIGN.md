@@ -36,12 +36,19 @@ A thread is a directory, `~/.agent-threads/<id>/` by default (override with
 
 The root is **outside any repo** so threads (scratch, not a system of record) are
 never git-tracked. An earlier design put them at `<git-root>/.agent-threads/`,
-but that pollutes `git status` in every consuming repo; the home default avoids
-that and survives reboots/temp-sweeps (which matters for persistent sessions),
-while the system temp dir would not. `init` also drops a self-ignoring
-`.gitignore` (`*`) in the root as insurance for anyone who overrides `$ATHREAD_DIR`
-into a repo. The kickoff bakes the absolute root in, so both peers still
-rendezvous regardless of where it lives.
+but that pollutes `git status` in every consuming repo. Home vs the system temp
+dir is a close call - both work, since two live agents imply the same boot and
+the files are actively polled, so neither is swept mid-session. Home is the
+default for a mundane reason: a thread is a useful transcript (you can
+`athread read` an old one to see what two agents worked out), and a stable
+location keeps it findable and cleanable, whereas the temp dir would GC that
+history (its no-accumulation behaviour is the fair counterpoint). It is
+explicitly NOT about surviving reboots - a reboot kills the agent sessions too,
+so a surviving file cannot be continued; persistence (`--follow`) is only about
+idle gaps while both agents are alive. `init` self-ignores ONLY a dedicated
+`.agent-threads` root; it never writes a `.gitignore` into an arbitrary
+`$ATHREAD_DIR`, which could otherwise ignore a whole repo. The kickoff bakes the
+absolute root in, so both peers rendezvous regardless of where it lives.
 
 ## Protocol
 

@@ -211,16 +211,22 @@ async function main() {
       throw new Error(`athread: --turn "${turn}" is not one of the participants`);
     }
     const session = !!a.session;
-    const roundCap = a['round-cap'] !== undefined
-      ? posNum(a['round-cap'], 'round-cap', { int: true })
-      : (session ? null : 15); // sessions are unlimited by default
+    if (session && a['round-cap'] !== undefined) {
+      throw new Error('athread: --session implies an unlimited round cap; do not combine it with --round-cap');
+    }
+    const roundCap = session
+      ? null // sessions are unlimited
+      : (a['round-cap'] !== undefined ? posNum(a['round-cap'], 'round-cap', { int: true }) : 15);
     const exists = fs.existsSync(metaPath(id));
     if (exists && !a.force) {
       throw new Error(`athread: thread ${id} already exists; pass --force to reset it`);
     }
     fs.mkdirSync(dir(id), { recursive: true });
-    // belt-and-suspenders: if the root ever lands inside a repo, self-ignore it
-    try { fs.writeFileSync(path.join(root, '.gitignore'), '*\n', { flag: 'wx' }); } catch { /* already there */ }
+    // Self-ignore ONLY a dedicated `.agent-threads` root. Never drop a "*"
+    // .gitignore into an arbitrary $ATHREAD_DIR -- it could ignore a whole repo.
+    if (path.basename(root) === '.agent-threads') {
+      try { fs.writeFileSync(path.join(root, '.gitignore'), '*\n', { flag: 'wx' }); } catch { /* already there */ }
+    }
     if (exists && a.force) {
       for (const f of msgFiles(id)) fs.rmSync(path.join(dir(id), f));
       try { fs.rmdirSync(path.join(dir(id), '.lock')); } catch { /* ignore */ }
