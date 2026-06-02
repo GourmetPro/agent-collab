@@ -1,4 +1,4 @@
-# Agent Skills
+# agent-collab
 
 Agent skills for coordinating work *between* agent sessions - distributed via
 the [Agent Skills open standard](https://github.com/anthropics/skills).
@@ -25,10 +25,10 @@ converge, or want two open sessions to talk without you relaying.
 
 ```bash
 # Install everything
-npx skills add <org>/agent-skills
+npx skills add gourmetpro/agent-collab
 
 # Or install a specific skill
-npx skills add <org>/agent-skills --skill agent-thread
+npx skills add gourmetpro/agent-collab --skill agent-thread
 ```
 
 For local development, symlink a skill into your agent's skills directory, e.g.
