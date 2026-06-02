@@ -1,0 +1,10 @@
+.DS_Store
+*.log
+node_modules/
+.env
+.env.local
+.vscode/
+.idea/
+
+# scratch thread channels created by the agent-thread skill
+.agent-threads/
