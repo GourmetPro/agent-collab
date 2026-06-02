@@ -82,10 +82,11 @@ check('init: rejects duplicate participants', dup.code === 1);
 const three = await run(['init', '--thread', 'p3', '--participants', 'a,b,c']);
 check('init: rejects three participants', three.code === 1);
 
-// --- id safety / path traversal ---
-const escape = await run(['init', '--thread', '../escape', '--participants', 'a,b']);
+// --- id safety / path traversal (unique outside name so the check is self-owned) ---
+const escName = `escape-${process.pid}-${Date.now()}`;
+const escape = await run(['init', '--thread', `../${escName}`, '--participants', 'a,b']);
 check('id: rejects path-traversing thread id', escape.code === 1);
-check('id: nothing written outside the root', !fs.existsSync(path.join(path.dirname(TMP), 'escape')));
+check('id: nothing written outside the root', !fs.existsSync(path.join(path.dirname(TMP), escName)));
 
 // --- wait returns immediately when already resolved ---
 const w = await run(['wait', '--thread', T, '--as', 'author', '--timeout', '2']);
@@ -99,6 +100,20 @@ const wt = await run(['wait', '--thread', T2, '--as', 'b', '--timeout', '3', '--
 check('wait: returns on your turn', wt.code === 0 && /your turn/.test(wt.out));
 const wto = await run(['wait', '--thread', T2, '--as', 'a', '--timeout', '1', '--interval', '1']);
 check('wait: exit 2 on timeout', wto.code === 2);
+
+// --- numeric arg validation (a bad timeout must fail fast, not hang) ---
+const badTimeout = await run(['wait', '--thread', T2, '--as', 'a', '--timeout', 'nope', '--interval', '1']);
+check('wait: rejects non-numeric timeout (no hang)', badTimeout.code === 1 && /timeout/.test(badTimeout.err));
+const badInterval = await run(['wait', '--thread', T2, '--as', 'a', '--timeout', '5', '--interval', '-1']);
+check('wait: rejects non-positive interval', badInterval.code === 1);
+const badCap = await run(['init', '--thread', 'badcap', '--participants', 'a,b', '--round-cap', '0']);
+check('init: rejects non-positive round-cap', badCap.code === 1);
+
+// --- participant checks on wait + kickoff (no silent stall / dead launcher) ---
+const waitStranger = await run(['wait', '--thread', T2, '--as', 'stranger', '--timeout', '2']);
+check('wait: rejects non-participant', waitStranger.code === 1 && /not a participant/.test(waitStranger.err));
+const koStranger = await run(['kickoff', '--thread', T2, '--as', 'typo']);
+check('kickoff: rejects non-participant handle', koStranger.code === 1 && /not a participant/.test(koStranger.err));
 
 // --- concurrency: two simultaneous (forced) writes must not collide on index ---
 const T3 = 'race';

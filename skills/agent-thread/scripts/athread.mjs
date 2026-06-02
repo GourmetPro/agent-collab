@@ -68,6 +68,15 @@ function assertSafeHandle(h) {
 // single-quote for safe interpolation into a shell snippet
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
+function posNum(val, name, { int = false } = {}) {
+  if (val === true) throw new Error(`athread: --${name} requires a value`);
+  const n = Number(val);
+  if (!Number.isFinite(n) || n <= 0 || (int && !Number.isInteger(n))) {
+    throw new Error(`athread: --${name} must be a positive ${int ? 'integer' : 'number'} (got "${val}")`);
+  }
+  return n;
+}
+
 const dir = (i) => path.join(root, i);
 const metaPath = (i) => path.join(dir(i), 'meta.json');
 const readMeta = (i) => JSON.parse(fs.readFileSync(metaPath(i), 'utf8'));
@@ -189,6 +198,7 @@ async function main() {
     if (!participants.includes(turn)) {
       throw new Error(`athread: --turn "${turn}" is not one of the participants`);
     }
+    const roundCap = a['round-cap'] === undefined ? 15 : posNum(a['round-cap'], 'round-cap', { int: true });
     const exists = fs.existsSync(metaPath(id));
     if (exists && !a.force) {
       throw new Error(`athread: thread ${id} already exists; pass --force to reset it`);
@@ -203,7 +213,7 @@ async function main() {
       participants,
       turn,
       status: 'open',
-      round_cap: Number(a['round-cap'] || 15),
+      round_cap: roundCap,
       created: nowIso(),
     });
     console.log(id);
@@ -227,14 +237,21 @@ async function main() {
     assertSafeId(id);
     const m = readMeta(id);
     const handle = assertSafeHandle(a.as && a.as !== true ? a.as : m.participants[1]);
+    if (!m.participants.includes(handle)) {
+      throw new Error(`athread: "${handle}" is not a participant of ${id} (${m.participants.join(', ')})`);
+    }
     const peer = otherOf(m, handle);
     const role = typeof a.role === 'string' ? a.role : '';
     console.log(kickoffPrompt({ handle, peer, threadId: id, role }));
   } else if (cmd === 'wait') {
     assertSafeId(id);
     const who = assertSafeHandle(a.as);
-    const timeout = Number(a.timeout || 1800) * 1000;
-    const interval = Number(a.interval || 3) * 1000;
+    const m0 = readMeta(id);
+    if (!m0.participants.includes(who)) {
+      throw new Error(`athread: "${who}" is not a participant of ${id} (${m0.participants.join(', ')})`);
+    }
+    const timeout = (a.timeout === undefined ? 1800 : posNum(a.timeout, 'timeout')) * 1000;
+    const interval = (a.interval === undefined ? 3 : posNum(a.interval, 'interval')) * 1000;
     const start = Date.now();
     for (;;) {
       const m = readMeta(id);
