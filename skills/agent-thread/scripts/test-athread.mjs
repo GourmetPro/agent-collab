@@ -11,6 +11,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const AT = path.join(here, 'athread.mjs');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'athread-test-'));
 const env = { ...process.env, ATHREAD_DIR: TMP };
+const defaultEnv = { ...process.env };
+delete defaultEnv.ATHREAD_DIR;
 
 function run(args) {
   return new Promise((resolve, reject) => {
@@ -24,6 +26,20 @@ function run(args) {
 }
 const runIn = (dirEnv, args) => new Promise((resolve) => {
   const p = spawn('node', [AT, ...args], { env: { ...process.env, ATHREAD_DIR: dirEnv } });
+  let out = '', err = '';
+  p.stdout.on('data', (d) => (out += d));
+  p.stderr.on('data', (d) => (err += d));
+  p.on('close', (code) => resolve({ code, out, err }));
+});
+const runWithEnv = (extraEnv, args, opts = {}) => new Promise((resolve) => {
+  const p = spawn('node', [AT, ...args], { cwd: opts.cwd, env: { ...process.env, ...extraEnv } });
+  let out = '', err = '';
+  p.stdout.on('data', (d) => (out += d));
+  p.stderr.on('data', (d) => (err += d));
+  p.on('close', (code) => resolve({ code, out, err }));
+});
+const runDirect = (dirEnv, args) => new Promise((resolve) => {
+  const p = spawn(AT, args, { env: { ...process.env, ATHREAD_DIR: dirEnv } });
   let out = '', err = '';
   p.stdout.on('data', (d) => (out += d));
   p.stderr.on('data', (d) => (err += d));
@@ -153,10 +169,12 @@ const SPACE = fs.mkdtempSync(path.join(os.tmpdir(), 'athread test ')); // note t
   });
   await sp(['init', '--thread', 'k', '--participants', 'claude,codex']);
   const ko = await sp(['kickoff', '--thread', 'k', '--as', 'codex']);
-  check('kickoff: single-quotes the ATHREAD_DIR path', /export ATHREAD_DIR='[^']*athread test [^']*'/.test(ko.out));
-  check('kickoff: quotes the AT path', /\bAT='[^']*athread\.mjs'/.test(ko.out));
+  check('kickoff: quotes the custom --root path',
+    ko.out.includes(`--root '${SPACE}'`));
+  check('kickoff: fallback uses the executable script directly',
+    ko.out.includes(`${AT} wait --root '${SPACE}' --thread k --as codex`));
   check('kickoff: greeting is a handle label, not an identity claim', /Your thread handle is "codex"/.test(ko.out) && !/You are "codex"/.test(ko.out));
-  check('kickoff: tells the peer to load the agent-thread skill', /"agent-thread" skill is available/.test(ko.out));
+  check('kickoff: tells the peer to load the agent-thread skill', /Use the agent-thread skill/.test(ko.out));
   check('kickoff: points at SKILL.md when it exists on disk', /its entrypoint is: \S*SKILL\.md/.test(ko.out));
 }
 fs.rmSync(SPACE, { recursive: true, force: true });
@@ -168,6 +186,47 @@ check('init: self-ignores a dedicated .agent-threads root',
   fs.existsSync(path.join(GIROOT, '.gitignore')) && fs.readFileSync(path.join(GIROOT, '.gitignore'), 'utf8').trim() === '*');
 check('init: does NOT write a .gitignore into an arbitrary $ATHREAD_DIR (would clobber a repo)',
   !fs.existsSync(path.join(TMP, '.gitignore')));
+
+// --- default/custom root selection + executable fallback ---
+const DEFHOME = fs.mkdtempSync(path.join(os.tmpdir(), 'athread-home-'));
+const DEFCWD = fs.mkdtempSync(path.join(os.tmpdir(), 'athread-cwd-'));
+fs.mkdirSync(path.join(DEFCWD, '.git'));
+const defaultRoot = path.join(fs.realpathSync(DEFHOME), '.agent-threads');
+await runWithEnv({ ...defaultEnv, HOME: DEFHOME }, ['init', '--thread', 'd', '--participants', 'a,b'], { cwd: DEFCWD });
+check('default root: uses ~/.agent-threads when ATHREAD_DIR and --root are unset',
+  fs.existsSync(path.join(defaultRoot, 'd', 'meta.json')));
+check('default root: does not create a worktree-local thread root',
+  !fs.existsSync(path.join(DEFCWD, '.agent-threads')));
+const defaultKo = await runWithEnv({ ...defaultEnv, HOME: DEFHOME }, ['kickoff', '--thread', 'd', '--as', 'b'], { cwd: DEFCWD });
+check('kickoff default root: skill-first prompt names the thread and handle',
+  /Use the agent-thread skill/.test(defaultKo.out) && /Join thread d as b/.test(defaultKo.out));
+check('kickoff default root: omits redundant ATHREAD_DIR export and --root flag',
+  !/export ATHREAD_DIR/.test(defaultKo.out) && !/--root /.test(defaultKo.out));
+check('kickoff default root: fallback uses executable script directly',
+  defaultKo.out.includes(`${AT} wait --thread d --as b`) && !/node "\$AT"/.test(defaultKo.out));
+check('kickoff default root: fallback includes post via body-file and resolve',
+  /post --thread d --as b --body-file /.test(defaultKo.out) && /resolve --thread d --as b --body /.test(defaultKo.out));
+check('kickoff default root: does not bake in the initiator temp dir',
+  !defaultKo.out.includes(os.tmpdir()) && /PATH_YOU_WROTE/.test(defaultKo.out));
+
+const CUSTOM = fs.mkdtempSync(path.join(os.tmpdir(), 'athread custom '));
+await runWithEnv({ ATHREAD_DIR: TMP }, ['init', '--root', CUSTOM, '--thread', 'custom', '--participants', 'a,b']);
+check('--root: overrides ATHREAD_DIR for thread storage',
+  fs.existsSync(path.join(CUSTOM, 'custom', 'meta.json')) && !fs.existsSync(path.join(TMP, 'custom', 'meta.json')));
+const customKo = await runWithEnv({ ATHREAD_DIR: TMP }, ['kickoff', '--root', CUSTOM, '--thread', 'custom', '--as', 'b']);
+check('kickoff custom root: uses --root in fallback instead of exporting ATHREAD_DIR',
+  customKo.out.includes(`wait --root '${CUSTOM}' --thread custom --as b`) && !/export ATHREAD_DIR/.test(customKo.out));
+check('kickoff custom root: fallback includes post and resolve with --root after the subcommand',
+  customKo.out.includes(`post --root '${CUSTOM}' --thread custom --as b --body-file `)
+    && customKo.out.includes(`resolve --root '${CUSTOM}' --thread custom --as b --body `));
+check('kickoff custom root: does not bake in an initiator body-file path',
+  !/athread-custom-b\.md/.test(customKo.out) && /PATH_YOU_WROTE/.test(customKo.out));
+const direct = await runDirect(CUSTOM, ['status', '--thread', 'custom']);
+check('executable: athread.mjs runs directly through its shebang',
+  direct.code === 0 && /"id": "custom"/.test(direct.out));
+fs.rmSync(DEFHOME, { recursive: true, force: true });
+fs.rmSync(DEFCWD, { recursive: true, force: true });
+fs.rmSync(CUSTOM, { recursive: true, force: true });
 
 // --- sessions: unlimited cap + session marker ---
 const SESS = 'sess';
@@ -198,7 +257,8 @@ check('wait --follow: emits a heartbeat to stderr while waiting', /still waiting
 
 // --- kickoff is session-aware ---
 const koS = await run(['kickoff', '--thread', SESS, '--as', 'b']);
-check('kickoff (session): wait uses --follow', /wait --thread "\$T" --as 'b' --follow/.test(koS.out));
+check('kickoff (session): wait uses --follow',
+  /wait .*--thread sess --as b --follow/.test(koS.out));
 check('kickoff (session): frames an ongoing session', /ongoing session/i.test(koS.out));
 await run(['init', '--thread', 'knorm', '--participants', 'a,b']);
 const koN = await run(['kickoff', '--thread', 'knorm', '--as', 'b']);

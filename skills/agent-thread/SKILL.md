@@ -24,11 +24,12 @@ on-disk thread, looping until one of them marks it resolved. The human kicks off
 each peer once, then stays out of the loop - no copy-pasting messages between
 sessions.
 
-The conversation lives in plain files (`~/.agent-threads/<id>/` by default -
-outside any repo, so threads are never git-tracked; override with `$ATHREAD_DIR`),
-driven by one zero-dependency CLI: `scripts/athread.mjs`. There is no server,
-daemon, or MCP. `wait` is the whole mechanism: it blocks until it is your turn,
-then prints the peer's latest message.
+The conversation lives in plain files (`~/.agent-threads/<id>/` by default;
+override with `--root <path>` or `$ATHREAD_DIR` for a custom shared root),
+driven by one zero-dependency CLI: `scripts/athread.mjs`. The default avoids
+hidden thread folders in arbitrary working directories and keeps transcripts
+findable. There is no server, daemon, or MCP. `wait` is the whole mechanism: it
+blocks until it is your turn, then prints the peer's latest message.
 
 The channel is **pattern-agnostic**. What differs between collaboration types is
 only two things: the opening message the initiator posts, and what "resolved"
@@ -37,7 +38,9 @@ means. The mechanics below are identical for all of them.
 ## Your job (in order)
 
 1. Find the CLI: it is `scripts/athread.mjs` next to this file. Set
-   `AT="<absolute path to scripts/athread.mjs>"` for the commands below.
+   `AT="<absolute path to scripts/athread.mjs>"` for the commands below. The
+   script is executable directly; use `node "$AT"` only if a copied install lost
+   its executable bit.
 2. Decide whether you are **joining** or **initiating**:
    - The human pasted a kickoff prompt -> you are **joining**. Follow that prompt;
      your specific task is in the first message you `wait` for.
@@ -82,24 +85,24 @@ The loop is the same for every pattern; only your opening post changes.
    or `driver,navigator`; reserve harness labels like `claude,codex` for when that
    makes routing clearer:
    ```
-   node "$AT" init --thread <id> --participants <you>,<peer>
+   "$AT" init --thread <id> --participants <you>,<peer>
    ```
    `--round-cap N` defaults to 15.
 2. Post the opening turn. State the **pattern**, your role and the peer's role,
    point at anything by **absolute path**, and say what **"resolved" looks like**:
    ```
-   node "$AT" post --thread <id> --as <you> \
+   "$AT" post --thread <id> --as <you> \
      --body "Pattern: review. You are the reviewer. Critique the spec at /abs/path. Post concrete blocking issues; resolve when none remain. Don't edit it yourself."
    ```
 3. Hand the human a one-paste launcher for the other session:
    ```
-   node "$AT" kickoff --thread <id> --as <peer> [--role "<short label>"]
+   "$AT" kickoff --thread <id> --as <peer> [--role "<short label>"]
    ```
    Print its output and tell the human: "Paste this into your other agent session."
    (`--role` is an optional one-line hint; the real task is in your opening post.)
 4. Wait for the peer (see [the wake mechanic](#the-wake-mechanic)):
    ```
-   node "$AT" wait --thread <id> --as <you>
+   "$AT" wait --thread <id> --as <you>
    ```
 5. On each peer turn: do your part (revise the artifact, answer, integrate the
    sub-task, react to the idea...), then `post` your reply - or `resolve` if the
@@ -148,26 +151,29 @@ agree to.
 
 ## CLI reference
 
-All commands take `--thread <id>`. The thread root is `$ATHREAD_DIR`, else
-`~/.agent-threads/` (outside any repo, so threads are never git-tracked).
+All commands take `--thread <id>`. The thread root is `--root <path>`, else
+`$ATHREAD_DIR`, else `~/.agent-threads/`. Generated kickoff prompts use `--root`
+for non-default roots instead of exporting `$ATHREAD_DIR`; manual users may
+still set `$ATHREAD_DIR`.
 
 | Command | Purpose |
 |---|---|
-| `init --thread T --participants a,b [--round-cap N] [--turn a] [--session] [--force]` | Create a thread (exactly two distinct handles). `--session` = unlimited round cap + `wait --follow` in the kickoff, for ongoing multi-topic channels. Fails if `T` already exists unless `--force`, which resets it and clears old messages. |
-| `post --thread T --as W (--body "..." \| --body-file F) [--force]` | Add your turn; flips the turn to the peer. Rejected unless it is your turn (`--force` overrides). |
-| `resolve --thread T --as W [--body "..."] [--force]` | Close the thread (no more posts allowed). Same turn rule as `post`. |
-| `wait --thread T --as W [--timeout S] [--interval S] [--follow]` | Block until your turn or resolved; print latest. Exit 2 on timeout, unless `--follow`, which never gives up (prints a stderr heartbeat and keeps waiting) - for session threads. |
-| `read --thread T` | Print the whole transcript. |
-| `status --thread T` | Print meta + round count as JSON. |
-| `kickoff --thread T --as W [--role "label"]` | Emit a self-contained paste-prompt to launch the other peer. |
+| `init [--root R] --thread T --participants a,b [--round-cap N] [--turn a] [--session] [--force]` | Create a thread (exactly two distinct handles). `--session` = unlimited round cap + `wait --follow` in the kickoff, for ongoing multi-topic channels. Fails if `T` already exists unless `--force`, which resets it and clears old messages. |
+| `post [--root R] --thread T --as W (--body "..." \| --body-file F) [--force]` | Add your turn; flips the turn to the peer. Rejected unless it is your turn (`--force` overrides). |
+| `resolve [--root R] --thread T --as W [--body "..."] [--force]` | Close the thread (no more posts allowed). Same turn rule as `post`. |
+| `wait [--root R] --thread T --as W [--timeout S] [--interval S] [--follow]` | Block until your turn or resolved; print latest. Exit 2 on timeout, unless `--follow`, which never gives up (prints a stderr heartbeat and keeps waiting) - for session threads. |
+| `read [--root R] --thread T` | Print the whole transcript. |
+| `status [--root R] --thread T` | Print meta + round count as JSON. |
+| `kickoff [--root R] --thread T --as W [--role "label"]` | Emit a self-contained paste-prompt to launch the other peer. |
 
 Turn-taking is enforced: `post`/`resolve` only succeed when `meta.turn` names
 you, so a confused peer cannot post twice or talk over the other. `--force` is
 the escape hatch for recovering a stuck thread. Thread ids and handles must be
 safe slugs (letters, digits, `.` `_` `-`) - no path separators.
 
-`--body-file` and piped stdin both work for long bodies, so you never have to
-cram a multi-paragraph turn onto one shell line.
+For multi-paragraph turns, write the body to a temp file and use `--body-file`.
+This keeps shell quoting simple and makes Codex approval prompts stable; reserve
+`--body "..."` for short one-line turns. Piped stdin also works for long bodies.
 
 ## When NOT to use
 

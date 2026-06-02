@@ -28,27 +28,34 @@ skills/agent-thread/
 ## Channel
 
 A thread is a directory, `~/.agent-threads/<id>/` by default (override with
-`$ATHREAD_DIR`):
+`--root <path>` or `$ATHREAD_DIR`):
 
 - `meta.json` - `{ participants:[a,b], turn, status, session, round_cap, created, updated }`
 - `NNNN.<handle>.md` - append-only messages, one per turn, with an HTML-comment
   header (`from`/`to`/`round`/`ts`, plus `resolve` on the closing message).
 
-The root is **outside any repo** so threads (scratch, not a system of record) are
-never git-tracked. An earlier design put them at `<git-root>/.agent-threads/`,
-but that pollutes `git status` in every consuming repo. Home vs the system temp
-dir is a close call - both work, since two live agents imply the same boot and
-the files are actively polled, so neither is swept mid-session. Home is the
-default for a mundane reason: a thread is a useful transcript (you can
-`athread read` an old one to see what two agents worked out), and a stable
-location keeps it findable and cleanable, whereas the temp dir would GC that
-history (its no-accumulation behaviour is the fair counterpoint). It is
+The default root is global scratch state under the home directory, not worktree
+state. This avoids changing `git status` or creating hidden folders in arbitrary
+directories. Home vs the system temp dir is a close call - both work, since two
+live agents imply the same boot and the files are actively polled, so neither is
+swept mid-session. Home is the default for a mundane reason: a thread is a useful
+transcript (you can `athread read` an old one to see what two agents worked out),
+and a stable location keeps it findable and cleanable, whereas the temp dir would
+GC that history (its no-accumulation behaviour is the fair counterpoint). It is
 explicitly NOT about surviving reboots - a reboot kills the agent sessions too,
 so a surviving file cannot be continued; persistence (`--follow`) is only about
-idle gaps while both agents are alive. `init` self-ignores ONLY a dedicated
-`.agent-threads` root; it never writes a `.gitignore` into an arbitrary
-`$ATHREAD_DIR`, which could otherwise ignore a whole repo. The kickoff bakes the
-absolute root in, so both peers rendezvous regardless of where it lives.
+idle gaps while both agents are alive.
+
+Codex may ask once because the root is outside the workspace write sandbox; the
+launcher uses a direct executable command so the user can approve the
+`athread.mjs` prefix instead of approving arbitrary shell snippets. Long turns
+use `--body-file` to keep post commands stable and avoid fragile shell quoting.
+Users who want zero prompts beyond initial configuration can add the thread root
+to Codex's writable roots. `init` self-ignores ONLY a dedicated `.agent-threads`
+root; it never writes a `.gitignore` into an arbitrary `--root`/`$ATHREAD_DIR`,
+which could otherwise ignore a whole repo. The kickoff bakes the absolute custom
+root into fallback commands when needed, so both peers rendezvous regardless of
+where it lives.
 
 ## Protocol
 
@@ -66,9 +73,10 @@ absolute root in, so both peers rendezvous regardless of where it lives.
 - **Roles vs identity are orthogonal.** Handles are free-form (`claude,codex` or
   `author,reviewer`); roles live in the SKILL recipes and the opening message,
   not in the CLI.
-- **Kickoff is one paste.** `athread kickoff` emits a self-contained prompt (with
-  the absolute script path and thread baked in) that the human pastes into the
-  other session to launch the peer. The protocol text lives in one place.
+- **Kickoff is one paste.** `athread kickoff` emits a skill-first prompt plus a
+  complete direct-executable fallback loop (with the absolute script path,
+  custom root when needed, thread, and handle baked in) that the human pastes into
+  the other session to launch the peer. The protocol text lives in one place.
 
 ## Collaboration patterns
 
