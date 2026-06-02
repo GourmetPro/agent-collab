@@ -4,7 +4,7 @@
 //
 // Subcommands: init | post | resolve | wait | read | status | kickoff
 //
-// A thread is a directory:  $ATHREAD_DIR/<id>/
+// A thread is a directory under the resolved thread root:
 //   meta.json        { participants, turn, status, round_cap, ... }
 //   0001.<who>.md    append-only messages, one per turn
 // `wait` polls the directory until it is your turn (or the thread is resolved),
@@ -20,12 +20,6 @@ import process from 'node:process';
 
 const SELF = path.resolve(process.argv[1]);
 const SAFE = /^[A-Za-z0-9._-]+$/; // thread ids and handles
-
-// Threads live OUTSIDE any repo by default, so they are never tracked by git.
-// Override with $ATHREAD_DIR (e.g. point it at a repo or the system temp dir).
-const root = process.env.ATHREAD_DIR
-  ? path.resolve(process.env.ATHREAD_DIR)
-  : path.join(os.homedir(), '.agent-threads');
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -45,6 +39,22 @@ const [, , cmd, ...rest] = process.argv;
 const a = parseArgs(rest);
 const id = a.thread || process.env.ATHREAD_ID || a._[0];
 
+function defaultRoot() {
+  return path.resolve(path.join(os.homedir(), '.agent-threads'));
+}
+
+function rootFrom(args) {
+  if (args.root === true) throw new Error('athread: --root requires a value');
+  if (args.root !== undefined) return path.resolve(args.root);
+  if (process.env.ATHREAD_DIR) return path.resolve(process.env.ATHREAD_DIR);
+  return defaultRoot();
+}
+
+// Threads live OUTSIDE any repo by default, so they are never tracked by git.
+// Override with --root or $ATHREAD_DIR (e.g. point it at a repo or temp dir).
+const root = rootFrom(a);
+const usesDefaultRoot = path.normalize(root) === path.normalize(defaultRoot());
+
 function assertSafeId(i) {
   if (!i || i === true) throw new Error('athread: thread id required (--thread <id>)');
   if (i === '.' || i === '..' || !SAFE.test(i)) {
@@ -60,6 +70,11 @@ function assertSafeHandle(h) {
 }
 // single-quote for safe interpolation into a shell snippet
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+const SAFE_PATH = /^[A-Za-z0-9._/-]+$/;
+const unquotedSlug = (s) => (SAFE.test(String(s)) ? String(s) : shq(s));
+const selfTok = () => (SAFE_PATH.test(SELF) ? SELF : shq(SELF));
+const rootArg = () => (usesDefaultRoot ? '' : ` --root ${shq(root)}`);
+const cli = (subcommand) => `${selfTok()} ${subcommand}${rootArg()}`;
 
 function posNum(val, name, { int = false } = {}) {
   if (val === true) throw new Error(`athread: --${name} requires a value`);
@@ -151,12 +166,11 @@ function printLatest(i) {
 // a path with spaces or shell metacharacters cannot break the one-paste launcher.
 function kickoffPrompt({ handle, peer, threadId, role, session }) {
   const roleLine = role ? `Your collaboration role: ${role}.\n` : '';
-  const AT = shq(SELF);
-  const DIR = shq(root);
-  const T = shq(threadId);
-  const H = shq(handle);
+  const T = unquotedSlug(threadId);
+  const H = unquotedSlug(handle);
+  const bodyFile = 'PATH_YOU_WROTE';
   const skillPath = path.resolve(path.dirname(SELF), '..', 'SKILL.md');
-  const skillLine = 'If an "agent-thread" skill is available in your environment, load it now for the full protocol (collaboration patterns, escalation rules).'
+  const skillLine = 'Use the agent-thread skill if it is available in your environment; it contains the full protocol (collaboration patterns, escalation rules).'
     + (fs.existsSync(skillPath) ? ` If you can read local files, its entrypoint is: ${skillPath}` : '');
   const loopVerb = session
     ? 'This is an ongoing session: keep looping until the peer resolves the thread or tells you the session is over.'
@@ -164,32 +178,33 @@ function kickoffPrompt({ handle, peer, threadId, role, session }) {
   const framing = session
     ? '\nOngoing session: reply one turn at a time and keep waiting between turns. Do NOT resolve until the peer says the session is over.\n'
     : '';
-  const waitLine = session
-    ? `node "$AT" wait --thread "$T" --as ${H} --follow --interval 3\n     (waits until it is your turn, then prints the peer's latest message; --follow keeps waiting across idle gaps and prints a heartbeat to stderr)`
-    : `node "$AT" wait --thread "$T" --as ${H} --timeout 1800 --interval 3\n     (blocks until it is your turn, then prints the peer's latest message + round/cap)`;
-  const replyLine = session
-    ? `node "$AT" post --thread "$T" --as ${H} --body "<your turn>"\n     Then go back to waiting. Do NOT resolve unless the peer says the session is over.`
-    : `node "$AT" post --thread "$T" --as ${H} --body "<your turn>"\n     When the shared goal is met, end the thread instead of posting:\n       node "$AT" resolve --thread "$T" --as ${H} --body "<the outcome>"`;
-  const step4 = session ? 'Repeat from step 1.' : 'If the thread is resolved, STOP. Otherwise repeat from step 1.';
+  const waitCmd = session
+    ? `${cli('wait')} --thread ${T} --as ${H} --follow --interval 3`
+    : `${cli('wait')} --thread ${T} --as ${H} --timeout 1800 --interval 3`;
+  const postCmd = `${cli('post')} --thread ${T} --as ${H} --body-file ${shq(bodyFile)}`;
+  const resolveCmd = `${cli('resolve')} --thread ${T} --as ${H} --body "<the outcome>"`;
+  const resolveStep = session
+    ? `4. If the peer says the session is over, resolve it:\n       ${resolveCmd}\n  5. Otherwise repeat from step 1.`
+    : `4. If the shared goal is met, resolve it:\n       ${resolveCmd}\n  5. Otherwise repeat from step 1.`;
   const footer = session
     ? 'Your specific task is in the first message you receive. Keep each turn concrete and brief. `wait --follow` keeps waiting across idle gaps; if your terminal is reaped, just re-run the same wait command. Stop only when the peer resolves the thread.'
     : 'Your specific task and goal are in the first message you receive. Keep each turn concrete and brief. If you hit the round cap or a wait times out, stop and tell the human.';
-  return `You are joining a shared agent-thread. Your thread handle is "${handle}" (use this exact value for --as); the peer's handle is "${peer}".
-${roleLine}Communicate ONLY through the thread, using this zero-dep Node CLI. ${loopVerb}
+  return `Use the agent-thread skill. Join thread ${threadId} as ${handle}.
+
+You are joining a shared agent-thread. Your thread handle is "${handle}" (use this exact value for --as); the peer's handle is "${peer}".
+${roleLine}Communicate ONLY through the thread. ${loopVerb}
 ${framing}
 ${skillLine}
-Then follow the concrete loop below; it has the exact CLI path, thread root, thread id, and --as handle for this collaboration.
 
-  AT=${AT}
-  export ATHREAD_DIR=${DIR}
-  T=${T}
+If the skill is unavailable, use this executable CLI fallback. It has the exact CLI path, thread id, and --as handle for this collaboration.
 
 Loop:
-  1. ${waitLine}
+  1. ${waitCmd}
+     (waits until it is your turn, then prints the peer's latest message${session ? '; --follow keeps waiting across idle gaps and prints a heartbeat to stderr' : ' + round/cap'})
   2. Do your part of what the message asks. Read or inspect anything it references (files, paths, the working tree).
-  3. Reply with your turn:
-       ${replyLine}
-  4. ${step4}
+  3. Write your reply to a temp file your environment can write. Replace ${bodyFile} below with that path (quote it if it contains spaces), then post it:
+       ${postCmd}
+  ${resolveStep}
 
 ${footer}`;
 }
@@ -309,7 +324,7 @@ async function main() {
     }
   } else {
     console.error('usage: athread init|post|resolve|wait|read|status|kickoff');
-    console.error('  --thread <id> --as <handle> [--body <text> | --body-file <path>] [--force]');
+    console.error('  [--root <path>] --thread <id> --as <handle> [--body <text> | --body-file <path>] [--force]');
     process.exit(1);
   }
 }
