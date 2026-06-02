@@ -157,13 +157,19 @@ function printLatest(i) {
 // is surfaced as a one-line hint. All shell-interpolated values are quoted so
 // a path with spaces or shell metacharacters cannot break the one-paste launcher.
 function kickoffPrompt({ handle, peer, threadId, role }) {
-  const roleLine = role ? `Your role: ${role}.\n` : '';
+  const roleLine = role ? `Your collaboration role: ${role}.\n` : '';
   const AT = shq(SELF);
   const DIR = shq(root);
   const T = shq(threadId);
   const H = shq(handle);
-  return `You are "${handle}", collaborating with peer "${peer}" through a shared agent-thread.
+  const skillPath = path.resolve(path.dirname(SELF), '..', 'SKILL.md');
+  const skillLine = 'If an "agent-thread" skill is available in your environment, load it now for the full protocol (collaboration patterns, escalation rules).'
+    + (fs.existsSync(skillPath) ? ` If you can read local files, its entrypoint is: ${skillPath}` : '');
+  return `You are joining a shared agent-thread. Your thread handle is "${handle}" (use this exact value for --as); the peer's handle is "${peer}".
 ${roleLine}Communicate ONLY through the thread, using this zero-dep Node CLI. Loop until the thread is resolved.
+
+${skillLine}
+Then follow the concrete loop below; it has the exact CLI path, thread root, thread id, and --as handle for this collaboration.
 
   AT=${AT}
   export ATHREAD_DIR=${DIR}

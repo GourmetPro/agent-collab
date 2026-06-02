@@ -148,6 +148,9 @@ const SPACE = fs.mkdtempSync(path.join(os.tmpdir(), 'athread test ')); // note t
   const ko = await sp(['kickoff', '--thread', 'k', '--as', 'codex']);
   check('kickoff: single-quotes the ATHREAD_DIR path', /export ATHREAD_DIR='[^']*athread test [^']*'/.test(ko.out));
   check('kickoff: quotes the AT path', /\bAT='[^']*athread\.mjs'/.test(ko.out));
+  check('kickoff: greeting is a handle label, not an identity claim', /Your thread handle is "codex"/.test(ko.out) && !/You are "codex"/.test(ko.out));
+  check('kickoff: tells the peer to load the agent-thread skill', /"agent-thread" skill is available/.test(ko.out));
+  check('kickoff: points at SKILL.md when it exists on disk', /its entrypoint is: \S*SKILL\.md/.test(ko.out));
 }
 fs.rmSync(SPACE, { recursive: true, force: true });
 

@@ -76,8 +76,10 @@ none of those apply, do it inline instead.
 
 The loop is the same for every pattern; only your opening post changes.
 
-1. Start the thread (pick a short readable id; handles are free-form - use the
-   harness names `claude,codex` or roles `author,reviewer`):
+1. Start the thread (pick a short readable id). Handles are **thread labels used
+   with `--as`, not agent identities** - prefer role labels like `author,reviewer`
+   or `driver,navigator`; reserve harness labels like `claude,codex` for when that
+   makes routing clearer:
    ```
    node "$AT" init --thread <id> --participants <you>,<peer>
    ```
