@@ -9,12 +9,16 @@
 //   0001.<who>.md    append-only messages, one per turn
 // `wait` polls the directory until it is your turn (or the thread is resolved),
 // then prints the latest message. That is the whole "comes back to you" mechanic.
+//
+// Turn-taking is enforced: post/resolve are rejected unless meta.turn names you
+// (pass --force to override, e.g. to recover a stuck thread).
 
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
 const SELF = path.resolve(process.argv[1]);
+const SAFE = /^[A-Za-z0-9._-]+$/; // thread ids and handles
 
 function gitRootOrCwd() {
   let dir = process.cwd();
@@ -47,6 +51,22 @@ function parseArgs(argv) {
 const [, , cmd, ...rest] = process.argv;
 const a = parseArgs(rest);
 const id = a.thread || process.env.ATHREAD_ID || a._[0];
+
+function assertSafeId(i) {
+  if (!i || i === true) throw new Error('athread: thread id required (--thread <id>)');
+  if (i === '.' || i === '..' || !SAFE.test(i)) {
+    throw new Error(`athread: unsafe thread id "${i}" (allowed: letters, digits, "." "_" "-")`);
+  }
+  return i;
+}
+function assertSafeHandle(h) {
+  if (!h || h === true || !SAFE.test(h)) {
+    throw new Error(`athread: unsafe or missing handle "${h}" (allowed: letters, digits, "." "_" "-")`);
+  }
+  return h;
+}
+// single-quote for safe interpolation into a shell snippet
+const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 const dir = (i) => path.join(root, i);
 const metaPath = (i) => path.join(dir(i), 'meta.json');
@@ -87,8 +107,8 @@ function bodyFrom(args) {
   try { return fs.readFileSync(0, 'utf8'); } catch { return ''; }
 }
 
-function writeMessage(i, who, body, kind) {
-  if (!who) throw new Error('athread: --as <handle> is required');
+function writeMessage(i, who, body, kind, force) {
+  assertSafeHandle(who);
   return withLock(i, () => {
     const m = readMeta(i);
     if (!m.participants.includes(who)) {
@@ -96,6 +116,9 @@ function writeMessage(i, who, body, kind) {
     }
     if (m.status === 'resolved') {
       throw new Error(`athread: thread ${i} is already resolved`);
+    }
+    if (m.turn !== who && !force) {
+      throw new Error(`athread: not your turn on ${i} (turn=${m.turn}, you=${who}); pass --force to override`);
     }
     const n = nextIndex(i);
     const to = otherOf(m, who);
@@ -122,24 +145,29 @@ function printLatest(i) {
 // Pattern-agnostic: the peer's specific job arrives in the first message it
 // waits for. This prompt only teaches the mechanics + the loop. An optional
 // freeform --role label (e.g. "reviewer", "backend API owner", "navigator")
-// is surfaced as a one-line hint.
+// is surfaced as a one-line hint. All shell-interpolated values are quoted so
+// a path with spaces or shell metacharacters cannot break the one-paste launcher.
 function kickoffPrompt({ handle, peer, threadId, role }) {
   const roleLine = role ? `Your role: ${role}.\n` : '';
+  const AT = shq(SELF);
+  const DIR = shq(root);
+  const T = shq(threadId);
+  const H = shq(handle);
   return `You are "${handle}", collaborating with peer "${peer}" through a shared agent-thread.
 ${roleLine}Communicate ONLY through the thread, using this zero-dep Node CLI. Loop until the thread is resolved.
 
-  AT=${SELF}
-  export ATHREAD_DIR=${root}
-  T=${threadId}
+  AT=${AT}
+  export ATHREAD_DIR=${DIR}
+  T=${T}
 
 Loop:
-  1. node "$AT" wait --thread $T --as ${handle} --timeout 1800 --interval 3
+  1. node "$AT" wait --thread "$T" --as ${H} --timeout 1800 --interval 3
      (blocks until it is your turn, then prints the peer's latest message + round/cap)
   2. Do your part of what the message asks. Read or inspect anything it references (files, paths, the working tree).
   3. Reply with your turn:
-       node "$AT" post --thread $T --as ${handle} --body "<your turn>"
+       node "$AT" post --thread "$T" --as ${H} --body "<your turn>"
      When the shared goal is met, end the thread instead of posting:
-       node "$AT" resolve --thread $T --as ${handle} --body "<the outcome>"
+       node "$AT" resolve --thread "$T" --as ${H} --body "<the outcome>"
   4. If the thread is resolved, STOP. Otherwise repeat from step 1.
 
 Your specific task and goal are in the first message you receive. Keep each turn concrete and brief. If you hit the round cap or a wait times out, stop and tell the human.`;
@@ -147,39 +175,64 @@ Your specific task and goal are in the first message you receive. Keep each turn
 
 async function main() {
   if (cmd === 'init') {
-    const participants = (a.participants || 'author,reviewer').split(',').map((s) => s.trim());
-    if (!id) throw new Error('athread: thread id required (--thread <id>)');
+    assertSafeId(id);
+    const participants = (a.participants === true ? '' : (a.participants || 'author,reviewer'))
+      .split(',').map((s) => s.trim()).filter(Boolean);
+    if (participants.length !== 2) {
+      throw new Error('athread: exactly two distinct participants required (--participants a,b)');
+    }
+    if (participants[0] === participants[1]) {
+      throw new Error('athread: participants must be distinct');
+    }
+    participants.forEach(assertSafeHandle);
+    const turn = a.turn && a.turn !== true ? a.turn : participants[0];
+    if (!participants.includes(turn)) {
+      throw new Error(`athread: --turn "${turn}" is not one of the participants`);
+    }
+    const exists = fs.existsSync(metaPath(id));
+    if (exists && !a.force) {
+      throw new Error(`athread: thread ${id} already exists; pass --force to reset it`);
+    }
     fs.mkdirSync(dir(id), { recursive: true });
+    if (exists && a.force) {
+      for (const f of msgFiles(id)) fs.rmSync(path.join(dir(id), f));
+      try { fs.rmdirSync(path.join(dir(id), '.lock')); } catch { /* ignore */ }
+    }
     writeMeta(id, {
       id,
       participants,
-      turn: a.turn || participants[0],
+      turn,
       status: 'open',
       round_cap: Number(a['round-cap'] || 15),
       created: nowIso(),
     });
     console.log(id);
   } else if (cmd === 'post') {
-    console.log(writeMessage(id, a.as, bodyFrom(a)));
+    assertSafeId(id);
+    console.log(writeMessage(id, a.as, bodyFrom(a), undefined, a.force));
   } else if (cmd === 'resolve') {
-    console.log(writeMessage(id, a.as, bodyFrom(a) || 'RESOLVED - no blocking issues.', 'resolve'));
+    assertSafeId(id);
+    console.log(writeMessage(id, a.as, bodyFrom(a) || 'RESOLVED - no blocking issues.', 'resolve', a.force));
   } else if (cmd === 'read') {
+    assertSafeId(id);
     for (const f of msgFiles(id)) {
       console.log(`===== ${f} =====`);
       console.log(fs.readFileSync(path.join(dir(id), f), 'utf8').trimEnd() + '\n');
     }
   } else if (cmd === 'status') {
+    assertSafeId(id);
     const m = readMeta(id);
     console.log(JSON.stringify({ ...m, rounds: msgFiles(id).length }, null, 2));
   } else if (cmd === 'kickoff') {
+    assertSafeId(id);
     const m = readMeta(id);
-    const handle = a.as || m.participants[1];
+    const handle = assertSafeHandle(a.as && a.as !== true ? a.as : m.participants[1]);
     const peer = otherOf(m, handle);
     const role = typeof a.role === 'string' ? a.role : '';
     console.log(kickoffPrompt({ handle, peer, threadId: id, role }));
   } else if (cmd === 'wait') {
-    const who = a.as;
-    if (!who) throw new Error('athread: --as <handle> is required');
+    assertSafeId(id);
+    const who = assertSafeHandle(a.as);
     const timeout = Number(a.timeout || 1800) * 1000;
     const interval = Number(a.interval || 3) * 1000;
     const start = Date.now();
@@ -206,7 +259,7 @@ async function main() {
     }
   } else {
     console.error('usage: athread init|post|resolve|wait|read|status|kickoff');
-    console.error('  --thread <id> --as <handle> [--body <text> | --body-file <path>]');
+    console.error('  --thread <id> --as <handle> [--body <text> | --body-file <path>] [--force]');
     process.exit(1);
   }
 }

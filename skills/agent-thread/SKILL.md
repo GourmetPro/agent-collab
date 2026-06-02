@@ -139,13 +139,18 @@ All commands take `--thread <id>`. The thread root is `$ATHREAD_DIR`, else
 
 | Command | Purpose |
 |---|---|
-| `init --thread T --participants a,b [--round-cap N] [--turn a]` | Create a thread. |
-| `post --thread T --as W (--body "..." \| --body-file F)` | Add your turn; flips the turn to the peer. |
-| `resolve --thread T --as W [--body "..."]` | Close the thread (no more posts allowed). |
+| `init --thread T --participants a,b [--round-cap N] [--turn a] [--force]` | Create a thread (exactly two distinct handles). Fails if `T` already exists unless `--force`, which resets it and clears old messages. |
+| `post --thread T --as W (--body "..." \| --body-file F) [--force]` | Add your turn; flips the turn to the peer. Rejected unless it is your turn (`--force` overrides). |
+| `resolve --thread T --as W [--body "..."] [--force]` | Close the thread (no more posts allowed). Same turn rule as `post`. |
 | `wait --thread T --as W [--timeout S] [--interval S]` | Block until your turn or resolved; print latest. Exit 2 on timeout. |
 | `read --thread T` | Print the whole transcript. |
 | `status --thread T` | Print meta + round count as JSON. |
 | `kickoff --thread T --as W [--role "label"]` | Emit a self-contained paste-prompt to launch the other peer. |
+
+Turn-taking is enforced: `post`/`resolve` only succeed when `meta.turn` names
+you, so a confused peer cannot post twice or talk over the other. `--force` is
+the escape hatch for recovering a stuck thread. Thread ids and handles must be
+safe slugs (letters, digits, `.` `_` `-`) - no path separators.
 
 `--body-file` and piped stdin both work for long bodies, so you never have to
 cram a multi-paragraph turn onto one shell line.

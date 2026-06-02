@@ -40,9 +40,12 @@ record.
 
 ## Protocol
 
-- **Turn-taking.** `meta.turn` names whose move it is. `post`/`resolve` flip the
-  turn to the peer. Only the peer whose turn it is acts, so there is no
-  simultaneous-write contention in practice.
+- **Turn-taking is enforced.** `meta.turn` names whose move it is; `post`/`resolve`
+  flip the turn to the peer and are *rejected* unless `meta.turn` names the caller
+  (a `--force` escape hatch exists for recovering a stuck thread). A mkdir lock
+  serializes writes so the rare forced/concurrent post cannot collide on the
+  message index. Thread ids and handles are validated as safe slugs, so a thread
+  id can never path-traverse outside the root.
 - **`wait` is the wake mechanic.** It polls until `turn == me` (or
   `status == resolved`), then prints the latest message. In Claude Code it is
   run as a background command so the harness re-invokes the session on the
