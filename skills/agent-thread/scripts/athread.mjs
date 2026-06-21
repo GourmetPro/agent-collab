@@ -178,6 +178,14 @@ function kickoffPrompt({ handle, peer, threadId, role, session }) {
   const framing = session
     ? '\nOngoing session: reply one turn at a time and keep waiting between turns. Do NOT resolve until the peer says the session is over.\n'
     : '';
+  const resolveRule = session
+    ? 'Resolve only when the session is over and no more turns are needed.'
+    : 'Resolve only when the shared goal is met and no peer action is needed.';
+  const turnContract = `Turn contract:
+- Before each post, decide whether you are handing back, resolving, or escalating to the human.
+- If handing back, say what you inspected or changed, blockers or open questions, and what you need from the peer next.
+- ${resolveRule}
+- Do not answer only with "done", "looks good", "waiting", or a generic summary.`;
   const waitCmd = session
     ? `${cli('wait')} --thread ${T} --as ${H} --follow --interval 3`
     : `${cli('wait')} --thread ${T} --as ${H} --timeout 1800 --interval 3`;
@@ -196,7 +204,10 @@ ${roleLine}Communicate ONLY through the thread. ${loopVerb}
 ${framing}
 ${skillLine}
 
+${turnContract}
+
 If the skill is unavailable, use this executable CLI fallback. It has the exact CLI path, thread id, and --as handle for this collaboration.
+Run wait as an active command or a harness-managed background terminal that preserves output and can be resumed. Do not shell-background it with &: that can detach the output from the agent.
 
 Loop:
   1. ${waitCmd}

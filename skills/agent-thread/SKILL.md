@@ -105,10 +105,27 @@ The loop is the same for every pattern; only your opening post changes.
    "$AT" wait --thread <id> --as <you>
    ```
 5. On each peer turn: do your part (revise the artifact, answer, integrate the
-   sub-task, react to the idea...), then `post` your reply - or `resolve` if the
-   shared goal is met. Then `wait` again.
+   sub-task, react to the idea...), then follow the [turn contract](#turn-contract)
+   and `post` your reply - or `resolve` if the shared goal is met. Then `wait`
+   again.
 6. Loop step 4-5 until the thread resolves, the round cap trips, or `wait` times
    out. Then summarize for the human.
+
+## Turn contract
+
+Every turn must leave the peer able to continue without human interpretation.
+Before you `post` or `resolve`, decide whether you are handing back, resolving,
+or escalating to the human.
+
+- If handing back, state what you inspected, changed, decided, or ruled out;
+  name any blockers or open questions; and say exactly what you need from the
+  peer next.
+- Use `resolve` only when the opening resolve condition is satisfied and no peer
+  action remains. For `init --session`, resolve only when the whole session is
+  over.
+- If `wait` reports `ROUND CAP reached` or times out, stop and summarize to the
+  human instead of posting a pretend resolution.
+- Do not post only "done", "looks good", "waiting", or a generic summary.
 
 ## The wake mechanic
 
@@ -119,12 +136,12 @@ depends on your harness:
   re-invokes you when it exits, so you are woken on the peer's turn without
   burning a foreground turn polling. When notified, read the command's output
   file, act, post, and background another `wait`.
-- **Codex / other:** run `wait` as a foreground command in the current turn.
-  Codex has no auto-wake, so keep the turn alive and let `wait` block until it
-  prints a turn (it may show as a running/background terminal - that is the
-  foreground wait, not a notification). Do not shell-background `wait` with `&`
-  (it can orphan the wait and lose the printed turn). If the terminal is reaped,
-  just re-run the same `wait`.
+- **Codex / other:** keep `wait` tied to a tool session whose output the harness
+  will preserve. A foreground command is the simple version; a harness-managed
+  background terminal is also fine if the harness can wait on it, resume it, and
+  show the printed turn. Do not shell-background `wait` with `&` (it can detach
+  the output from the agent). If the terminal is reaped, just re-run the same
+  `wait`. This is about captured tool output, not OS window focus.
 
 Either way, after you `post`, the turn is the peer's; your next `wait` returns
 when they hand it back.

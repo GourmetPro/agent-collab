@@ -176,6 +176,10 @@ const SPACE = fs.mkdtempSync(path.join(os.tmpdir(), 'athread test ')); // note t
   check('kickoff: greeting is a handle label, not an identity claim', /Your thread handle is "codex"/.test(ko.out) && !/You are "codex"/.test(ko.out));
   check('kickoff: tells the peer to load the agent-thread skill', /Use the agent-thread skill/.test(ko.out));
   check('kickoff: points at SKILL.md when it exists on disk', /its entrypoint is: \S*SKILL\.md/.test(ko.out));
+  check('kickoff: includes a turn contract for concrete handoffs',
+    /Turn contract:/.test(ko.out) && /resolve only when/i.test(ko.out) && /what you need from the peer next/i.test(ko.out));
+  check('kickoff: distinguishes managed background waits from shell backgrounding',
+    /managed background terminal/i.test(ko.out) && /shell-background/i.test(ko.out));
 }
 fs.rmSync(SPACE, { recursive: true, force: true });
 
@@ -208,6 +212,8 @@ check('kickoff default root: fallback includes post via body-file and resolve',
   /post --thread d --as b --body-file /.test(defaultKo.out) && /resolve --thread d --as b --body /.test(defaultKo.out));
 check('kickoff default root: does not bake in the initiator temp dir',
   !defaultKo.out.includes(os.tmpdir()) && /PATH_YOU_WROTE/.test(defaultKo.out));
+check('kickoff default root: includes a concrete turn contract',
+  /Turn contract:/.test(defaultKo.out) && /Do not answer only with/.test(defaultKo.out));
 
 const CUSTOM = fs.mkdtempSync(path.join(os.tmpdir(), 'athread custom '));
 await runWithEnv({ ATHREAD_DIR: TMP }, ['init', '--root', CUSTOM, '--thread', 'custom', '--participants', 'a,b']);
@@ -260,6 +266,8 @@ const koS = await run(['kickoff', '--thread', SESS, '--as', 'b']);
 check('kickoff (session): wait uses --follow',
   /wait .*--thread sess --as b --follow/.test(koS.out));
 check('kickoff (session): frames an ongoing session', /ongoing session/i.test(koS.out));
+check('kickoff (session): turn contract keeps resolve reserved for session end',
+  /Turn contract:/.test(koS.out) && /resolve only when the session is over/i.test(koS.out));
 await run(['init', '--thread', 'knorm', '--participants', 'a,b']);
 const koN = await run(['kickoff', '--thread', 'knorm', '--as', 'b']);
 check('kickoff (non-session): uses --timeout, not --follow', /--timeout 1800/.test(koN.out) && !/--follow/.test(koN.out));

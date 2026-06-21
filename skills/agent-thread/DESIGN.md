@@ -70,6 +70,12 @@ where it lives.
   run as a background command so the harness re-invokes the session on the
   peer's turn; in Codex it is run inline and blocks the turn. Either way: no
   human relay between rounds.
+- **Each turn has a contract.** The protocol is plain text, so the skill and
+  generated kickoff both require peers to say what they inspected or changed,
+  blockers or open questions, and what they need from the peer next. `resolve`
+  is reserved for the actual resolve condition (or explicit session end), and
+  round-cap/timeout cases escalate to the human instead of becoming vague
+  "done" replies.
 - **Roles vs identity are orthogonal.** Handles are free-form (`claude,codex` or
   `author,reviewer`); roles live in the SKILL recipes and the opening message,
   not in the CLI.
