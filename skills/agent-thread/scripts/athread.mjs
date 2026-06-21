@@ -2,7 +2,7 @@
 // athread - a zero-dependency, file-based thread for two agent sessions to take
 // turns. Part of the `agent-thread` skill. Runs on any Node >= 18, no installs.
 //
-// Subcommands: init | post | resolve | wait | read | status | kickoff
+// Subcommands: init | post | resolve | wait | read | status | kickoff | help
 //
 // A thread is a directory under the resolved thread root:
 //   meta.json        { participants, turn, status, round_cap, ... }
@@ -25,7 +25,9 @@ function parseArgs(argv) {
   const out = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a.startsWith('--')) {
+    if (a === '-h') {
+      out.h = true;
+    } else if (a.startsWith('--')) {
       const key = a.slice(2);
       const next = argv[i + 1];
       if (next === undefined || next.startsWith('--')) out[key] = true;
@@ -38,6 +40,10 @@ function parseArgs(argv) {
 const [, , cmd, ...rest] = process.argv;
 const a = parseArgs(rest);
 const id = a.thread || process.env.ATHREAD_ID || a._[0];
+const helpRequested = cmd === 'help' || cmd === '--help' || cmd === '-h' || !!a.help || !!a.h;
+const helpTopic = cmd === 'help'
+  ? a._[0]
+  : (cmd && cmd !== '--help' && cmd !== '-h' ? cmd : undefined);
 
 function defaultRoot() {
   return path.resolve(path.join(os.homedir(), '.agent-threads'));
@@ -48,6 +54,188 @@ function rootFrom(args) {
   if (args.root !== undefined) return path.resolve(args.root);
   if (process.env.ATHREAD_DIR) return path.resolve(process.env.ATHREAD_DIR);
   return defaultRoot();
+}
+
+function helpText(topic) {
+  const exe = path.basename(SELF);
+  const commandHelp = {
+    init: `${exe} init - create a two-participant thread.
+
+Usage:
+  ${exe} init [--root R] --thread T --participants A,B [--turn A] [--round-cap N]
+  ${exe} init [--root R] --thread T --participants A,B --session
+
+Options:
+  --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
+  --thread <id>          Thread id. Safe slug only: letters, digits, ".", "_", "-".
+  --participants A,B     Exactly two distinct handles. Defaults to author,reviewer.
+  --turn <handle>        Initial turn holder. Defaults to the first participant.
+  --round-cap <N>        Max message count before wait warns to escalate. Default: 15.
+  --session              Ongoing channel: unlimited round cap; kickoff uses wait --follow.
+  --force                Reset an existing thread and clear old messages.
+  --help                 Show this help.
+
+Examples:
+  ${exe} init --thread review-1 --participants author,reviewer
+  ${exe} init --thread daily --participants codex,claude --session`,
+
+    post: `${exe} post - append your turn and hand control to the peer.
+
+Usage:
+  ${exe} post [--root R] --thread T --as HANDLE (--body TEXT | --body-file FILE)
+  ${exe} post [--root R] --thread T --as HANDLE < reply.md
+
+Options:
+  --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
+  --thread <id>          Thread id.
+  --as <handle>          Your participant handle.
+  --body <text>          Short one-line body.
+  --body-file <path>     File containing the turn body. Preferred for long replies.
+  --force                Post even if it is not your turn.
+  --help                 Show this help.
+
+Notes:
+  post is rejected unless --as matches the current turn, except with --force.
+  On session threads, post prints the exact wait --follow command to stderr.
+
+Example:
+  ${exe} post --thread review-1 --as author --body-file /tmp/reply.md`,
+
+    resolve: `${exe} resolve - append a final turn and close the thread.
+
+Usage:
+  ${exe} resolve [--root R] --thread T --as HANDLE [--body TEXT | --body-file FILE]
+
+Options:
+  --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
+  --thread <id>          Thread id.
+  --as <handle>          Your participant handle.
+  --body <text>          Resolution text. Defaults to a short resolved message.
+  --body-file <path>     File containing the resolution text.
+  --force                Resolve even if it is not your turn.
+  --help                 Show this help.
+
+Example:
+  ${exe} resolve --thread review-1 --as reviewer --body "No blocking issues remain."`,
+
+    wait: `${exe} wait - block until it is your turn or the thread resolves.
+
+Usage:
+  ${exe} wait [--root R] --thread T --as HANDLE [--timeout S] [--interval S]
+  ${exe} wait [--root R] --thread T --as HANDLE --follow [--timeout S] [--interval S]
+
+Options:
+  --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
+  --thread <id>          Thread id.
+  --as <handle>          Your participant handle.
+  --timeout <seconds>    Timeout window. Default: 1800. Exit 2 on timeout.
+  --interval <seconds>   Filesystem polling interval. Default: 3.
+  --follow               Never exit on timeout; print a periodic stderr heartbeat.
+  --help                 Show this help.
+
+Output:
+  When your turn arrives, prints the latest message and round/cap status.
+  When resolved, prints the latest message and status=resolved.
+  While pending, wait prints no stdout. Treat silence as expected.
+
+Examples:
+  ${exe} wait --thread review-1 --as author
+  ${exe} wait --thread daily --as codex --follow --interval 3`,
+
+    read: `${exe} read - print the whole transcript.
+
+Usage:
+  ${exe} read [--root R] --thread T
+
+Options:
+  --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
+  --thread <id>          Thread id.
+  --help                 Show this help.
+
+Example:
+  ${exe} read --thread review-1`,
+
+    status: `${exe} status - print thread metadata as JSON.
+
+Usage:
+  ${exe} status [--root R] --thread T
+
+Options:
+  --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
+  --thread <id>          Thread id.
+  --help                 Show this help.
+
+Example:
+  ${exe} status --thread review-1`,
+
+    kickoff: `${exe} kickoff - emit a one-paste launcher for the other session.
+
+Usage:
+  ${exe} kickoff [--root R] --thread T --as HANDLE [--role "short label"]
+
+Options:
+  --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
+  --thread <id>          Thread id.
+  --as <handle>          Peer handle that will receive the launcher.
+  --role <label>         Optional role hint included in the launcher.
+  --help                 Show this help.
+
+Example:
+  ${exe} kickoff --thread review-1 --as reviewer --role "reviewer"`,
+
+    help: `${exe} help - show global or command-specific help.
+
+Usage:
+  ${exe} --help
+  ${exe} help [command]
+  ${exe} <command> --help
+
+Examples:
+  ${exe} help wait
+  ${exe} post --help`,
+  };
+  if (!topic) {
+    return `${exe} - file-based turn-taking for two local agent sessions.
+
+Usage:
+  ${exe} <command> [options]
+  ${exe} help [command]
+  ${exe} <command> --help
+
+Commands:
+  init       Create or reset a thread.
+  post       Append your turn and hand control to the peer.
+  resolve    Append a final turn and close the thread.
+  wait       Block until your turn or resolution.
+  read       Print the transcript.
+  status     Print thread metadata as JSON.
+  kickoff    Emit a one-paste launcher for the peer session.
+  help       Show global or command-specific help.
+
+Global options:
+  --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
+  --thread <id>          Thread id. Can also come from $ATHREAD_ID or a positional id.
+  -h, --help             Show help.
+
+Thread ids and handles must be safe slugs: letters, digits, ".", "_", "-".
+Run "${exe} help wait" or "${exe} wait --help" for command-specific docs.`;
+  }
+  return commandHelp[topic];
+}
+
+function printHelp(topic) {
+  const text = helpText(topic);
+  if (!text) {
+    console.error(`athread: unknown help topic "${topic}"`);
+    console.error(`Run ${path.basename(SELF)} --help for available commands.`);
+    process.exit(1);
+  }
+  console.log(text);
+}
+
+if (helpRequested) {
+  printHelp(helpTopic);
+  process.exit(0);
 }
 
 // Threads live OUTSIDE any repo by default, so they are never tracked by git.
@@ -345,8 +533,8 @@ async function main() {
       await sleep(interval);
     }
   } else {
-    console.error('usage: athread init|post|resolve|wait|read|status|kickoff');
-    console.error('  [--root <path>] --thread <id> --as <handle> [--body <text> | --body-file <path>] [--force]');
+    console.error(cmd ? `athread: unknown command "${cmd}"` : 'athread: missing command');
+    console.error(`Run ${path.basename(SELF)} --help for usage.`);
     process.exit(1);
   }
 }

@@ -54,6 +54,37 @@ const check = (name, cond) => {
   if (!cond) failures++;
 };
 
+// --- help output ---
+const globalHelp = await run(['--help']);
+check('help: global --help exits 0',
+  globalHelp.code === 0 && /Usage:/.test(globalHelp.out) && /Commands:/.test(globalHelp.out) && globalHelp.err === '');
+check('help: global output lists command-specific help forms',
+  /help \[command\]/.test(globalHelp.out) && /<command> --help/.test(globalHelp.out));
+const shortHelp = await run(['-h']);
+check('help: -h exits 0 with global help',
+  shortHelp.code === 0 && /file-based turn-taking/.test(shortHelp.out));
+const waitHelp = await run(['wait', '--help']);
+check('help: command --help shows wait docs',
+  waitHelp.code === 0 && /Usage:\n  .* wait /.test(waitHelp.out) && /--follow/.test(waitHelp.out) && /Treat silence as expected/.test(waitHelp.out));
+const postHelp = await run(['help', 'post']);
+check('help: help <command> shows post docs',
+  postHelp.code === 0 && /append your turn/i.test(postHelp.out) && /--body-file/.test(postHelp.out));
+const helpHelp = await run(['help', 'help']);
+check('help: help command has command-specific docs',
+  helpHelp.code === 0 && /show global or command-specific help/i.test(helpHelp.out));
+const rootHelp = await run(['wait', '--root', '--help']);
+check('help: command help does not require incomplete option values',
+  rootHelp.code === 0 && /Usage:\n  .* wait /.test(rootHelp.out));
+const badHelp = await run(['help', 'nope']);
+check('help: unknown topic exits 1',
+  badHelp.code === 1 && /unknown help topic/.test(badHelp.err));
+const missingCommand = await run([]);
+check('help: missing command points to --help',
+  missingCommand.code === 1 && /missing command/.test(missingCommand.err) && /--help/.test(missingCommand.err));
+const unknownCommand = await run(['nope']);
+check('help: unknown command points to --help',
+  unknownCommand.code === 1 && /unknown command/.test(unknownCommand.err) && /--help/.test(unknownCommand.err));
+
 // --- core turn-taking flow ---
 const T = 'flow';
 await run(['init', '--thread', T, '--participants', 'author,reviewer']);

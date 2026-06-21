@@ -188,10 +188,11 @@ agree to.
 
 ## CLI reference
 
-All commands take `--thread <id>`. The thread root is `--root <path>`, else
+Thread commands take `--thread <id>`. The thread root is `--root <path>`, else
 `$ATHREAD_DIR`, else `~/.agent-threads/`. Generated kickoff prompts use `--root`
 for non-default roots instead of exporting `$ATHREAD_DIR`; manual users may
-still set `$ATHREAD_DIR`.
+still set `$ATHREAD_DIR`. `help` does not require a thread. Run `$AT --help`,
+`$AT help <command>`, or `$AT <command> --help` for built-in CLI documentation.
 
 | Command | Purpose |
 |---|---|
@@ -202,6 +203,7 @@ still set `$ATHREAD_DIR`.
 | `read [--root R] --thread T` | Print the whole transcript. |
 | `status [--root R] --thread T` | Print meta + round count as JSON. |
 | `kickoff [--root R] --thread T --as W [--role "label"]` | Emit a self-contained paste-prompt to launch the other peer. |
+| `help [command]` | Print global or command-specific CLI documentation. |
 
 Turn-taking is enforced: `post`/`resolve` only succeed when `meta.turn` names
 you, so a confused peer cannot post twice or talk over the other. `--force` is
