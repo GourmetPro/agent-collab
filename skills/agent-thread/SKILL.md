@@ -48,7 +48,9 @@ means. The mechanics below are identical for all of them.
      [pattern](#collaboration-patterns) (or improvise) and run
      [the loop](#running-a-collaboration-initiator).
 3. Loop to convergence, honoring the [escalation rules](#escalation--termination).
-4. When the thread resolves (or escalates), report the outcome to the human in
+4. After every non-resolving `post`, immediately rearm `wait` for your handle.
+   Do not report back to the human merely because the turn is now the peer's.
+5. When the thread resolves (or escalates), report the outcome to the human in
    one short summary.
 
 ## Collaboration patterns
@@ -106,8 +108,9 @@ The loop is the same for every pattern; only your opening post changes.
    ```
 5. On each peer turn: do your part (revise the artifact, answer, integrate the
    sub-task, react to the idea...), then follow the [turn contract](#turn-contract)
-   and `post` your reply - or `resolve` if the shared goal is met. Then `wait`
-   again.
+   and `post` your reply - or `resolve` if the shared goal is met. If you
+   posted, immediately `wait` again. The post is the handoff; the wait is what
+   keeps the agent-thread alive.
 6. Loop step 4-5 until the thread resolves, the round cap trips, or `wait` times
    out. Then summarize for the human.
 
@@ -120,6 +123,10 @@ or escalating to the human.
 - If handing back, state what you inspected, changed, decided, or ruled out;
   name any blockers or open questions; and say exactly what you need from the
   peer next.
+- After a handoff `post`, immediately rearm `wait` for your own handle. On a
+  session thread, this means `wait --follow` (or re-running the same captured
+  wait if your harness reaped it). Do not stop at `status` or tell the human
+  "turn is now <peer>" while the thread remains open.
 - Use `resolve` only when the opening resolve condition is satisfied and no peer
   action remains. For `init --session`, resolve only when the whole session is
   over.
@@ -141,17 +148,21 @@ depends on your harness:
   background terminal is also fine if the harness can wait on it, resume it, and
   show the printed turn. Do not shell-background `wait` with `&` (it can detach
   the output from the agent). If the terminal is reaped, just re-run the same
-  `wait`. This is about captured tool output, not OS window focus.
+  `wait`. For a session thread, use `wait --follow`; a finite `--timeout` is
+  only a fallback and must be rearmed before reporting back to the human. This
+  is about captured tool output, not OS window focus.
 
-Either way, after you `post`, the turn is the peer's; your next `wait` returns
-when they hand it back.
+Either way, after you `post`, the turn is the peer's; immediately rearm your
+next `wait` so it returns when they hand it back.
 
 For an **ongoing, multi-topic collaboration**, create the thread with
 `init --session`: the peer's kickoff then uses `wait --follow` (waits
 indefinitely across idle gaps, with a periodic stderr heartbeat) and the round
 cap is unlimited. Keep one session thread and treat each new topic as another
 turn; `resolve` only when the whole collaboration is done. Do not open a fresh
-thread (and re-paste a launcher) per topic - that ends the peer's loop.
+thread (and re-paste a launcher) per topic - that ends the peer's loop. Do not
+leave a session thread after posting unless it has resolved or escalated; keep a
+captured `wait --follow` active for your handle.
 
 ## Escalation - termination
 

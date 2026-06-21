@@ -241,7 +241,11 @@ check('init --session: marks the thread as a session', meta(SESS).session === tr
 check('init --session: round cap is unlimited (null)', meta(SESS).round_cap === null);
 const sessCap = await run(['init', '--thread', 'sc', '--participants', 'a,b', '--session', '--round-cap', '5']);
 check('init: rejects --session combined with --round-cap', sessCap.code === 1 && /--session/.test(sessCap.err));
-await run(['post', '--thread', SESS, '--as', 'a', '--body', 'hi']);
+const sessionPost = await run(['post', '--thread', SESS, '--as', 'a', '--body', 'hi']);
+check('post (session): reminds poster to rearm wait --follow',
+  sessionPost.out.trim() === '0001.a.md'
+    && /session remains open/i.test(sessionPost.err)
+    && /wait .*--thread sess --as a --follow/.test(sessionPost.err));
 const sw = await run(['wait', '--thread', SESS, '--as', 'b', '--timeout', '2']);
 check('wait: session thread reports cap unlimited, never ROUND CAP', /cap unlimited/.test(sw.out) && !/ROUND CAP/.test(sw.out));
 
@@ -268,6 +272,8 @@ check('kickoff (session): wait uses --follow',
 check('kickoff (session): frames an ongoing session', /ongoing session/i.test(koS.out));
 check('kickoff (session): turn contract keeps resolve reserved for session end',
   /Turn contract:/.test(koS.out) && /resolve only when the session is over/i.test(koS.out));
+check('kickoff (session): requires rearming wait after every post',
+  /After every post, immediately rearm the wait/i.test(koS.out));
 await run(['init', '--thread', 'knorm', '--participants', 'a,b']);
 const koN = await run(['kickoff', '--thread', 'knorm', '--as', 'b']);
 check('kickoff (non-session): uses --timeout, not --follow', /--timeout 1800/.test(koN.out) && !/--follow/.test(koN.out));

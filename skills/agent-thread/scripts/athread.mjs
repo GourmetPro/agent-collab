@@ -75,6 +75,8 @@ const unquotedSlug = (s) => (SAFE.test(String(s)) ? String(s) : shq(s));
 const selfTok = () => (SAFE_PATH.test(SELF) ? SELF : shq(SELF));
 const rootArg = () => (usesDefaultRoot ? '' : ` --root ${shq(root)}`);
 const cli = (subcommand) => `${selfTok()} ${subcommand}${rootArg()}`;
+const followWaitCmd = (threadId, handle) =>
+  `${cli('wait')} --thread ${unquotedSlug(threadId)} --as ${unquotedSlug(handle)} --follow --interval 3`;
 
 function posNum(val, name, { int = false } = {}) {
   if (val === true) throw new Error(`athread: --${name} requires a value`);
@@ -185,9 +187,10 @@ function kickoffPrompt({ handle, peer, threadId, role, session }) {
 - Before each post, decide whether you are handing back, resolving, or escalating to the human.
 - If handing back, say what you inspected or changed, blockers or open questions, and what you need from the peer next.
 - ${resolveRule}
+- After every post, immediately rearm the wait${session ? ' with --follow' : ''}; do not return to the human merely because the turn is now the peer's.
 - Do not answer only with "done", "looks good", "waiting", or a generic summary.`;
   const waitCmd = session
-    ? `${cli('wait')} --thread ${T} --as ${H} --follow --interval 3`
+    ? followWaitCmd(threadId, handle)
     : `${cli('wait')} --thread ${T} --as ${H} --timeout 1800 --interval 3`;
   const postCmd = `${cli('post')} --thread ${T} --as ${H} --body-file ${shq(bodyFile)}`;
   const resolveCmd = `${cli('resolve')} --thread ${T} --as ${H} --body "<the outcome>"`;
@@ -269,7 +272,13 @@ async function main() {
     console.log(id);
   } else if (cmd === 'post') {
     assertSafeId(id);
-    console.log(writeMessage(id, a.as, bodyFrom(a), undefined, a.force));
+    const who = assertSafeHandle(a.as);
+    const file = writeMessage(id, who, bodyFrom(a), undefined, a.force);
+    console.log(file);
+    const m = readMeta(id);
+    if (m.session && m.status === 'open') {
+      console.error(`[athread] session remains open; immediately rearm wait: ${followWaitCmd(id, who)}`);
+    }
   } else if (cmd === 'resolve') {
     assertSafeId(id);
     console.log(writeMessage(id, a.as, bodyFrom(a) || 'RESOLVED - no blocking issues.', 'resolve', a.force));

@@ -68,8 +68,11 @@ where it lives.
 - **`wait` is the wake mechanic.** It polls until `turn == me` (or
   `status == resolved`), then prints the latest message. In Claude Code it is
   run as a background command so the harness re-invokes the session on the
-  peer's turn; in Codex it is run inline and blocks the turn. Either way: no
-  human relay between rounds.
+  peer's turn; in Codex it is run inline or as a harness-managed background
+  terminal that preserves output. After any non-resolving `post`, the same
+  session must immediately rearm `wait` for its own handle; otherwise the thread
+  is only logically handed off, not operationally watched. Either way: no human
+  relay between rounds.
 - **Each turn has a contract.** The protocol is plain text, so the skill and
   generated kickoff both require peers to say what they inspected or changed,
   blockers or open questions, and what they need from the peer next. `resolve`
@@ -116,7 +119,9 @@ the easy path: unlimited round cap, and the kickoff emits `wait --follow`, which
 never exits on timeout - it keeps polling and prints a periodic stderr heartbeat
 so the terminal is visibly alive. The orchestrator keeps one session thread and
 treats each topic as another turn; `resolve` is the single explicit "session
-over" signal. Persistence is implemented as repeated bounded waits (heartbeat
+over" signal. `post` also emits a session-only stderr reminder with the exact
+`wait --follow` command to rearm, while keeping stdout as the message filename
+for scripts. Persistence is implemented as repeated bounded waits (heartbeat
 window preserved), not one unbounded sleep, per Codex's harness note that an
 indefinitely-open terminal is not independently resumable across sleep/cleanup.
 A "lobby" thread (peer awaits the next thread after a resolve) was considered and
