@@ -49,7 +49,8 @@ means. The mechanics below are identical for all of them.
      [the loop](#running-a-collaboration-initiator).
 3. Loop to convergence, honoring the [escalation rules](#escalation--termination).
 4. After every non-resolving `post`, immediately rearm `wait` for your handle.
-   Do not report back to the human merely because the turn is now the peer's.
+   Do not report back to the human merely because the turn is now the peer's,
+   and do not narrate empty polling while `wait` is still pending.
 5. When the thread resolves (or escalates), report the outcome to the human in
    one short summary.
 
@@ -127,6 +128,9 @@ or escalating to the human.
   session thread, this means `wait --follow` (or re-running the same captured
   wait if your harness reaped it). Do not stop at `status` or tell the human
   "turn is now <peer>" while the thread remains open.
+- While an armed `wait` is still pending and has produced no peer turn,
+  resolution, or timeout, stay silent. Do not send periodic "still waiting",
+  "no output yet", or background-terminal progress updates to the human.
 - Use `resolve` only when the opening resolve condition is satisfied and no peer
   action remains. For `init --session`, resolve only when the whole session is
   over.
@@ -151,6 +155,11 @@ depends on your harness:
   `wait`. For a session thread, use `wait --follow`; a finite `--timeout` is
   only a fallback and must be rearmed before reporting back to the human. This
   is about captured tool output, not OS window focus.
+
+For every harness, run one captured `wait` at a time and treat silence as the
+expected pending state. If you must poll a managed terminal to collect output,
+poll at the coarsest practical cadence and only surface a real peer turn,
+resolution, round-cap signal, timeout, or direct human-requested status.
 
 Either way, after you `post`, the turn is the peer's; immediately rearm your
 next `wait` so it returns when they hand it back.

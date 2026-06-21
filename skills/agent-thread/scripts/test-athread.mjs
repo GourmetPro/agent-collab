@@ -274,9 +274,13 @@ check('kickoff (session): turn contract keeps resolve reserved for session end',
   /Turn contract:/.test(koS.out) && /resolve only when the session is over/i.test(koS.out));
 check('kickoff (session): requires rearming wait after every post',
   /After every post, immediately rearm the wait/i.test(koS.out));
+check('kickoff (session): suppresses empty wait progress updates',
+  /stay silent/i.test(koS.out) && /still waiting/i.test(koS.out) && /progress updates/i.test(koS.out));
 await run(['init', '--thread', 'knorm', '--participants', 'a,b']);
 const koN = await run(['kickoff', '--thread', 'knorm', '--as', 'b']);
 check('kickoff (non-session): uses --timeout, not --follow', /--timeout 1800/.test(koN.out) && !/--follow/.test(koN.out));
+check('kickoff (non-session): suppresses empty wait progress updates',
+  /stay silent/i.test(koN.out) && /still waiting/i.test(koN.out) && /progress updates/i.test(koN.out));
 
 fs.rmSync(TMP, { recursive: true, force: true });
 if (failures) { console.error(`\n${failures} check(s) failed`); process.exit(1); }

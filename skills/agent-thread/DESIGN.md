@@ -72,7 +72,8 @@ where it lives.
   terminal that preserves output. After any non-resolving `post`, the same
   session must immediately rearm `wait` for its own handle; otherwise the thread
   is only logically handed off, not operationally watched. Either way: no human
-  relay between rounds.
+  relay between rounds, and no human-facing progress narration while a wait is
+  merely pending with no output.
 - **Each turn has a contract.** The protocol is plain text, so the skill and
   generated kickoff both require peers to say what they inspected or changed,
   blockers or open questions, and what they need from the peer next. `resolve`
