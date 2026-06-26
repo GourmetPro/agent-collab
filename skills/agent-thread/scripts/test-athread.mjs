@@ -444,6 +444,25 @@ check('status (single thread): shape unchanged - meta + rounds/messages/notes',
   singleFA1.id === FA1 && singleFA1.rounds === 1 && singleFA1.notes === 0
     && singleFA1.participants.join(',') === 'coord,w1');
 
+// --- pending: non-blocking peek at peer notes since my last substantive post ---
+const PD = 'pending-thread';
+await run(['init', '--thread', PD, '--participants', 'co,wk']); // turn co
+await run(['post', '--thread', PD, '--as', 'co', '--body', 'do the thing']); // 0001, turn wk (wk is now working)
+const p0 = await run(['pending', '--thread', PD, '--as', 'wk']);
+check('pending: exit 0 and no output when there are no notes', p0.code === 0 && p0.out.trim() === '');
+await run(['note', '--thread', PD, '--as', 'co', '--body', 'STOP: abandon that, it is moot']); // 0002 note
+const p1 = await run(['pending', '--thread', PD, '--as', 'wk']);
+check('pending: prints the peer STOP note, exit 0',
+  p1.code === 0 && /STOP: abandon that/.test(p1.out) && /0002\.~note\.co\.md/.test(p1.out));
+check('pending: does not change the turn or write anything',
+  meta(PD).turn === 'wk' && indices(PD).join(',') === '0001,0002');
+await run(['note', '--thread', PD, '--as', 'wk', '--body', 'my own scratch note']); // 0003 note by wk
+const p2 = await run(['pending', '--thread', PD, '--as', 'wk']);
+check('pending: shows only the peer notes, not my own',
+  /0002\.~note\.co\.md/.test(p2.out) && !/0003\.~note\.wk\.md/.test(p2.out));
+const pStranger = await run(['pending', '--thread', PD, '--as', 'nobody']);
+check('pending: rejects a non-participant', pStranger.code === 1 && /not a participant/.test(pStranger.err));
+
 // --- kickoff teaches out-of-band notes + the checkpoint ---
 check('kickoff (non-session): explains notes do not take the turn',
   /does NOT take the turn/i.test(koN.out) && / note .*--as b/.test(koN.out));

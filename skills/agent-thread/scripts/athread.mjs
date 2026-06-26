@@ -44,6 +44,7 @@ const commandOptions = {
   init: new Set([...commonOptions, 'participants', 'turn', 'round-cap', 'session', 'force']),
   post: new Set([...commonOptions, 'as', 'body', 'body-file', 'force']),
   note: new Set([...commonOptions, 'as', 'body', 'body-file']),
+  pending: new Set([...commonOptions, 'as']),
   resolve: new Set([...commonOptions, 'as', 'body', 'body-file', 'force']),
   wait: new Set([...commonOptions, 'as', 'timeout', 'interval', 'follow']),
   read: new Set(commonOptions),
@@ -151,6 +152,27 @@ Notes:
 
 Example:
   ${exe} note --thread review-1 --as author --body "STOP: that path is wrong, it is /srv/app"`,
+
+    pending: `${exe} pending - non-blocking peek at the peer's notes for you.
+
+Usage:
+  ${exe} pending [--root R] --thread T --as HANDLE
+
+Options:
+  --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
+  --thread <id>          Thread id.
+  --as <handle>          Your participant handle.
+  --help                 Show this help.
+
+Notes:
+  Prints the peer's notes since your last substantive post, then exits 0 (prints
+  nothing, still exit 0, when there are none). Never blocks, never writes, takes
+  no turn. This is the checkpoint primitive: a turn-holder mid-task can check for
+  a "stop"/correction note without ending its turn. (In a backgrounded wait loop,
+  "wait --as me" also returns immediately when it is your turn.)
+
+Example:
+  ${exe} pending --thread review-1 --as reviewer`,
 
     resolve: `${exe} resolve - append a final turn and close the thread.
 
@@ -263,10 +285,11 @@ Commands:
   init       Create or reset a thread.
   post       Append your turn and hand control to the peer.
   note       Append an out-of-band note without taking the turn.
+  pending    Non-blocking peek at the peer's notes for you.
   resolve    Append a final turn and close the thread.
   wait       Block until your turn or resolution.
   read       Print the transcript.
-  status     Print thread metadata as JSON.
+  status     Print thread metadata as JSON (--all for a fleet view).
   kickoff    Emit a one-paste launcher for the peer session.
   help       Show global or command-specific help.
 
@@ -580,6 +603,20 @@ async function main() {
     assertSafeId(id);
     const who = assertSafeHandle(a.as);
     console.log(writeMessage(id, who, bodyFrom(a), 'note', false));
+  } else if (cmd === 'pending') {
+    // Non-blocking checkpoint peek: print the PEER's notes since my last
+    // substantive post, then exit 0. No turn semantics, no write, never blocks.
+    assertSafeId(id);
+    const who = assertSafeHandle(a.as);
+    const m = readMeta(id);
+    if (!m.participants.includes(who)) {
+      throw new Error(`athread: "${who}" is not a participant of ${id} (${m.participants.join(', ')})`);
+    }
+    const since = lastSubstantiveIndex(id, who);
+    for (const f of msgFiles(id).filter((file) => isNoteFile(file) && fileIndex(file) > since && authorFromFile(file) !== who)) {
+      console.log(`===== ${f} =====`);
+      console.log(fs.readFileSync(path.join(dir(id), f), 'utf8').trimEnd());
+    }
   } else if (cmd === 'resolve') {
     assertSafeId(id);
     console.log(writeMessage(id, a.as, bodyFrom(a) || 'RESOLVED - no blocking issues.', 'resolve', a.force));
