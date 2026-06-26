@@ -134,11 +134,12 @@ Example:
 
 Usage:
   ${exe} note [--root R] --thread T --as HANDLE (--body TEXT | --body-file FILE)
+  ${exe} note [--root R] --thread A,B,C --as HANDLE --body TEXT   (broadcast)
   ${exe} note [--root R] --thread T --as HANDLE < note.md
 
 Options:
   --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
-  --thread <id>          Thread id.
+  --thread <id|a,b,c>    One thread id, or a comma list to broadcast the same note.
   --as <handle>          Your participant handle.
   --body <text>          Short one-line note body.
   --body-file <path>     File containing the note body.
@@ -149,6 +150,9 @@ Notes:
   regardless of whose turn it is. The peer sees it in its next wait window;
   notes never wake a pending wait. Rejected once the thread is resolved.
   The round cap counts substantive posts only, so notes never trip escalation.
+  Broadcast (comma list): best-effort fan-out; prints "id: <file>" or "id: ERROR ..."
+  per thread, rejects empty/duplicate ids, and exits nonzero if ANY target failed
+  (a non-zero exit reports write landing, NOT that the peer has collected the note).
 
 Example:
   ${exe} note --thread review-1 --as author --body "STOP: that path is wrong, it is /srv/app"`,
@@ -600,9 +604,30 @@ async function main() {
       console.error(`[athread] session remains open; immediately rearm wait: ${followWaitCmd(id, who)}`);
     }
   } else if (cmd === 'note') {
-    assertSafeId(id);
     const who = assertSafeHandle(a.as);
-    console.log(writeMessage(id, who, bodyFrom(a), 'note', false));
+    const spec = (a.thread !== undefined && a.thread !== true) ? String(a.thread) : (process.env.ATHREAD_ID || a._[0] || '');
+    const ids = spec.split(',').map((s) => s.trim());
+    const body = bodyFrom(a);
+    if (ids.length === 1) {
+      assertSafeId(ids[0]);
+      console.log(writeMessage(ids[0], who, body, 'note', false));
+    } else {
+      // Broadcast: validate the whole set up front, then best-effort fan-out.
+      if (ids.some((t) => t === '')) throw new Error('athread: empty thread id in --thread list');
+      const seen = new Set();
+      for (const t of ids) {
+        if (seen.has(t)) throw new Error(`athread: duplicate thread id "${t}" in --thread list`);
+        seen.add(t);
+      }
+      ids.forEach(assertSafeId);
+      let failed = 0;
+      for (const t of ids) {
+        try { console.log(`${t}: ${writeMessage(t, who, body, 'note', false)}`); }
+        catch (e) { failed++; console.log(`${t}: ERROR ${String(e.message || e)}`); }
+      }
+      // best-effort must not mean silent loss: a dropped target forces nonzero exit.
+      if (failed) process.exit(1);
+    }
   } else if (cmd === 'pending') {
     // Non-blocking checkpoint peek: print the PEER's notes since my last
     // substantive post, then exit 0. No turn semantics, no write, never blocks.

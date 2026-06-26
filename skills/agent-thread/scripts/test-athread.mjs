@@ -463,6 +463,26 @@ check('pending: shows only the peer notes, not my own',
 const pStranger = await run(['pending', '--thread', PD, '--as', 'nobody']);
 check('pending: rejects a non-participant', pStranger.code === 1 && /not a participant/.test(pStranger.err));
 
+// --- note broadcast: one note fanned out to a list of threads ---
+const B1 = 'bc-1', B2 = 'bc-2', B3 = 'bc-3';
+await run(['init', '--thread', B1, '--participants', 'co,w1']);
+await run(['init', '--thread', B2, '--participants', 'co,w2']);
+await run(['init', '--thread', B3, '--participants', 'co,w3']);
+await run(['post', '--thread', B1, '--as', 'co', '--body', 'go1']); // turn w1
+await run(['post', '--thread', B2, '--as', 'co', '--body', 'go2']); // turn w2
+await run(['resolve', '--thread', B3, '--as', 'co', '--body', 'done3']); // B3 resolved
+const bc = await run(['note', '--thread', `${B1},${B2}`, '--as', 'co', '--body', 'shared DB resetting, hold test:db']);
+check('note broadcast: posts to every listed thread, exit 0',
+  bc.code === 0 && /bc-1: 0002\.~note\.co\.md/.test(bc.out) && /bc-2: 0002\.~note\.co\.md/.test(bc.out));
+check('note broadcast: flips no turns', meta(B1).turn === 'w1' && meta(B2).turn === 'w2');
+const bcFail = await run(['note', '--thread', `${B1},${B3}`, '--as', 'co', '--body', 'rebase before PR']);
+check('note broadcast: nonzero exit when ANY target fails, with the failing id named',
+  bcFail.code === 1 && /bc-1: 0003\.~note\.co\.md/.test(bcFail.out) && /bc-3: ERROR/.test(bcFail.out) && /resolved/.test(bcFail.out));
+const bcEmpty = await run(['note', '--thread', `${B1},`, '--as', 'co', '--body', 'x']);
+check('note broadcast: rejects an empty thread id', bcEmpty.code === 1 && /empty thread id/.test(bcEmpty.err));
+const bcDup = await run(['note', '--thread', `${B1},${B1}`, '--as', 'co', '--body', 'x']);
+check('note broadcast: rejects duplicate thread ids', bcDup.code === 1 && /duplicate thread/.test(bcDup.err));
+
 // --- kickoff teaches out-of-band notes + the checkpoint ---
 check('kickoff (non-session): explains notes do not take the turn',
   /does NOT take the turn/i.test(koN.out) && / note .*--as b/.test(koN.out));
