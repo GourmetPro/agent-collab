@@ -321,6 +321,39 @@ check('kickoff (non-session): uses --timeout, not --follow', /--timeout 1800/.te
 check('kickoff (non-session): suppresses empty wait progress updates',
   /stay silent/i.test(koN.out) && /still waiting/i.test(koN.out) && /progress updates/i.test(koN.out));
 
+// --- notes: out-of-band, never take the turn ---
+const N = 'notes';
+await run(['init', '--thread', N, '--participants', 'a,b']); // turn = a
+await run(['post', '--thread', N, '--as', 'a', '--body', 'over to you']); // 0001, turn = b
+const noteByA = await run(['note', '--thread', N, '--as', 'a', '--body', 'extra context while you work']);
+check('note: succeeds when it is NOT your turn', noteByA.code === 0);
+check('note: does not change the turn', meta(N).turn === 'b');
+check('note: file uses the ~note marker', noteByA.out.trim() === '0002.~note.a.md');
+const noteByB = await run(['note', '--thread', N, '--as', 'b', '--body', 'note from the turn holder']);
+check('note: the turn holder can also note without taking the turn',
+  noteByB.code === 0 && noteByB.out.trim() === '0003.~note.b.md' && meta(N).turn === 'b');
+const noteStranger = await run(['note', '--thread', N, '--as', 'zzz', '--body', 'hi']);
+check('note: rejected for non-participant', noteStranger.code === 1 && /not a participant/.test(noteStranger.err));
+await run(['post', '--thread', N, '--as', 'b', '--body', 'done']); // 0004, turn = a
+await run(['resolve', '--thread', N, '--as', 'a', '--body', 'closing']); // 0005
+const noteResolved = await run(['note', '--thread', N, '--as', 'b', '--body', 'too late']);
+check('note: rejected after resolve', noteResolved.code === 1 && /resolved/.test(noteResolved.err));
+
+// --- notes: dotted handles never collide with the ~note marker ---
+const ND = 'notes-dotted';
+await run(['init', '--thread', ND, '--participants', 'alpha.note,beta']); // turn = alpha.note
+const dotPost = await run(['post', '--thread', ND, '--as', 'alpha.note', '--body', 'from dotted handle']);
+check('note/dotted: substantive file for handle "alpha.note" is 0001.alpha.note.md (not misread as a note)',
+  dotPost.code === 0 && dotPost.out.trim() === '0001.alpha.note.md');
+const dotStatus = JSON.parse((await run(['status', '--thread', ND])).out);
+check('status/dotted: dotted substantive counts as one round with zero notes',
+  dotStatus.rounds === 1 && dotStatus.notes === 0 && dotStatus.messages === 1);
+const dotNote = await run(['note', '--thread', ND, '--as', 'beta', '--body', 'a real note']);
+check('note/dotted: a real note is 0002.~note.beta.md', dotNote.out.trim() === '0002.~note.beta.md');
+const dotStatus2 = JSON.parse((await run(['status', '--thread', ND])).out);
+check('status/dotted: a note does not increment the substantive round count',
+  dotStatus2.rounds === 1 && dotStatus2.notes === 1 && dotStatus2.messages === 2);
+
 fs.rmSync(TMP, { recursive: true, force: true });
 if (failures) { console.error(`\n${failures} check(s) failed`); process.exit(1); }
 console.log('\nall checks passed');

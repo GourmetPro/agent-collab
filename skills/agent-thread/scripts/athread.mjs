@@ -43,6 +43,7 @@ const commonOptions = ['root', 'thread', 'help', 'h'];
 const commandOptions = {
   init: new Set([...commonOptions, 'participants', 'turn', 'round-cap', 'session', 'force']),
   post: new Set([...commonOptions, 'as', 'body', 'body-file', 'force']),
+  note: new Set([...commonOptions, 'as', 'body', 'body-file']),
   resolve: new Set([...commonOptions, 'as', 'body', 'body-file', 'force']),
   wait: new Set([...commonOptions, 'as', 'timeout', 'interval', 'follow']),
   read: new Set(commonOptions),
@@ -308,6 +309,14 @@ const metaPath = (i) => path.join(dir(i), 'meta.json');
 const readMeta = (i) => JSON.parse(fs.readFileSync(metaPath(i), 'utf8'));
 const writeMeta = (i, m) => fs.writeFileSync(metaPath(i), JSON.stringify(m, null, 2) + '\n');
 const msgFiles = (i) => fs.readdirSync(dir(i)).filter((f) => /^\d{4}\./.test(f)).sort();
+const isNoteFile = (f) => /^\d{4}\.~note\./.test(f);
+const fileIndex = (f) => parseInt(f.slice(0, 4), 10);
+const substantiveFilesOf = (i) => msgFiles(i).filter((f) => !isNoteFile(f));
+// Handles may contain dots, so derive the author from the filename, not by splitting on ".".
+const authorFromFile = (f) => f.slice(5).replace(/\.md$/, '').replace(/^~note\./, '');
+const lastSubstantiveIndex = (i, who) => substantiveFilesOf(i)
+  .filter((f) => authorFromFile(f) === who)
+  .reduce((max, f) => Math.max(max, fileIndex(f)), 0);
 const otherOf = (m, who) => m.participants.find((p) => p !== who) || '(peer)';
 const nowIso = () => new Date().toISOString();
 
@@ -344,6 +353,7 @@ function bodyFrom(args) {
 
 function writeMessage(i, who, body, kind, force) {
   assertSafeHandle(who);
+  const note = kind === 'note';
   return withLock(i, () => {
     const m = readMeta(i);
     if (!m.participants.includes(who)) {
@@ -352,18 +362,24 @@ function writeMessage(i, who, body, kind, force) {
     if (m.status === 'resolved') {
       throw new Error(`athread: thread ${i} is already resolved`);
     }
-    if (m.turn !== who && !force) {
+    // A note never claims the turn, so it skips the turn check; post/resolve still enforce it.
+    if (!note && m.turn !== who && !force) {
       throw new Error(`athread: not your turn on ${i} (turn=${m.turn}, you=${who}); pass --force to override`);
     }
     const n = nextIndex(i);
     const to = otherOf(m, who);
-    const file = `${n}.${who}.md`;
+    // round counts substantive messages only: a post is the next round, a note rides the current one.
+    const substantive = substantiveFilesOf(i).length;
+    const round = note ? substantive : substantive + 1;
+    const file = note ? `${n}.~note.${who}.md` : `${n}.${who}.md`;
     const tag = kind ? ` ${kind}` : '';
-    const header = `<!-- from:${who} to:${to}${tag} round:${parseInt(n, 10)} ts:${nowIso()} -->`;
+    const header = `<!-- from:${who} to:${to}${tag} round:${round} ts:${nowIso()} -->`;
     fs.writeFileSync(path.join(dir(i), file), `${header}\n${body.replace(/\s+$/, '')}\n`);
-    m.turn = to;
+    if (!note) {
+      m.turn = to;
+      if (kind === 'resolve') m.status = 'resolved';
+    }
     m.updated = nowIso();
-    if (kind === 'resolve') m.status = 'resolved';
     writeMeta(i, m);
     return file;
   });
@@ -497,6 +513,10 @@ async function main() {
     if (m.session && m.status === 'open') {
       console.error(`[athread] session remains open; immediately rearm wait: ${followWaitCmd(id, who)}`);
     }
+  } else if (cmd === 'note') {
+    assertSafeId(id);
+    const who = assertSafeHandle(a.as);
+    console.log(writeMessage(id, who, bodyFrom(a), 'note', false));
   } else if (cmd === 'resolve') {
     assertSafeId(id);
     console.log(writeMessage(id, a.as, bodyFrom(a) || 'RESOLVED - no blocking issues.', 'resolve', a.force));
@@ -509,7 +529,9 @@ async function main() {
   } else if (cmd === 'status') {
     assertSafeId(id);
     const m = readMeta(id);
-    console.log(JSON.stringify({ ...m, rounds: msgFiles(id).length }, null, 2));
+    const all = msgFiles(id);
+    const notes = all.filter(isNoteFile).length;
+    console.log(JSON.stringify({ ...m, rounds: all.length - notes, messages: all.length, notes }, null, 2));
   } else if (cmd === 'kickoff') {
     assertSafeId(id);
     const m = readMeta(id);
