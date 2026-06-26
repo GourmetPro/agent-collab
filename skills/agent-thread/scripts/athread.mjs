@@ -47,7 +47,7 @@ const commandOptions = {
   resolve: new Set([...commonOptions, 'as', 'body', 'body-file', 'force']),
   wait: new Set([...commonOptions, 'as', 'timeout', 'interval', 'follow']),
   read: new Set(commonOptions),
-  status: new Set(commonOptions),
+  status: new Set([...commonOptions, 'all']),
   kickoff: new Set([...commonOptions, 'as', 'role']),
 };
 
@@ -210,14 +210,20 @@ Example:
 
 Usage:
   ${exe} status [--root R] --thread T
+  ${exe} status [--root R] --all
 
 Options:
   --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
-  --thread <id>          Thread id.
+  --thread <id>          Thread id (single-thread mode).
+  --all                  Read-only fleet view: a JSON array over every thread under
+                         the root, each {id, participants, turn, status, rounds,
+                         messages, notes, last, updated}. updated is the newest file
+                         mtime; a garbled thread is flagged {id, error}, never crashes.
   --help                 Show this help.
 
-Example:
-  ${exe} status --thread review-1`,
+Examples:
+  ${exe} status --thread review-1
+  ${exe} status --all`,
 
     kickoff: `${exe} kickoff - emit a one-paste launcher for the other session.
 
@@ -341,6 +347,31 @@ const authorFromFile = (f) => f.slice(5).replace(/\.md$/, '').replace(/^~note\./
 const lastSubstantiveIndex = (i, who) => substantiveFilesOf(i)
   .filter((f) => authorFromFile(f) === who)
   .reduce((max, f) => Math.max(max, fileIndex(f)), 0);
+const lastIndexOf = (i) => msgFiles(i).reduce((m, f) => Math.max(m, fileIndex(f)), 0);
+// Newest file mtime in the thread dir - more current than meta.json mid-write.
+const updatedOf = (i) => {
+  let mtime = 0;
+  for (const f of fs.readdirSync(dir(i))) {
+    try { mtime = Math.max(mtime, fs.statSync(path.join(dir(i), f)).mtimeMs); } catch { /* ignore */ }
+  }
+  return mtime ? new Date(mtime).toISOString() : null;
+};
+function threadSummary(i) {
+  const m = readMeta(i);
+  const all = msgFiles(i);
+  const notes = all.filter(isNoteFile).length;
+  return {
+    id: i,
+    participants: m.participants,
+    turn: m.turn,
+    status: m.status,
+    rounds: all.length - notes,
+    messages: all.length,
+    notes,
+    last: lastIndexOf(i),
+    updated: updatedOf(i),
+  };
+}
 const otherOf = (m, who) => m.participants.find((p) => p !== who) || '(peer)';
 const nowIso = () => new Date().toISOString();
 
@@ -559,11 +590,27 @@ async function main() {
       console.log(fs.readFileSync(path.join(dir(id), f), 'utf8').trimEnd() + '\n');
     }
   } else if (cmd === 'status') {
-    assertSafeId(id);
-    const m = readMeta(id);
-    const all = msgFiles(id);
-    const notes = all.filter(isNoteFile).length;
-    console.log(JSON.stringify({ ...m, rounds: all.length - notes, messages: all.length, notes }, null, 2));
+    if (a.all) {
+      // Read-only fleet view: enumerate every thread dir under the root. No lock
+      // (a snapshot must not block live writers); a garbled thread is flagged,
+      // never crashes the listing.
+      const names = fs.existsSync(root)
+        ? fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort()
+        : [];
+      const out = [];
+      for (const tid of names) {
+        if (!fs.existsSync(metaPath(tid))) continue; // not a thread dir
+        try { out.push(threadSummary(tid)); }
+        catch (e) { out.push({ id: tid, error: String(e.message || e) }); }
+      }
+      console.log(JSON.stringify(out, null, 2));
+    } else {
+      assertSafeId(id);
+      const m = readMeta(id);
+      const all = msgFiles(id);
+      const notes = all.filter(isNoteFile).length;
+      console.log(JSON.stringify({ ...m, rounds: all.length - notes, messages: all.length, notes }, null, 2));
+    }
   } else if (cmd === 'kickoff') {
     assertSafeId(id);
     const m = readMeta(id);

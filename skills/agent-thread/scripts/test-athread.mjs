@@ -415,6 +415,35 @@ check('args: note rejects unknown --message flag',
   noteUnknownFlag.code === 1 && /unknown option "--message"/.test(noteUnknownFlag.err));
 check('args: rejected note leaves no message', indices('nv').length === 0);
 
+// --- status --all: read-only fleet view across threads ---
+const FA1 = 'fleet-a';
+const FA2 = 'fleet-b';
+await run(['init', '--thread', FA1, '--participants', 'coord,w1']); // turn coord
+await run(['init', '--thread', FA2, '--participants', 'coord,w2']); // turn coord
+await run(['post', '--thread', FA1, '--as', 'coord', '--body', 'go']); // FA1: turn w1, 1 substantive
+await run(['note', '--thread', FA2, '--as', 'coord', '--body', 'fyi']); // FA2: 1 note, turn unchanged
+const fa = await run(['status', '--all']);
+check('status --all: exits 0 with a JSON array, no --thread required',
+  fa.code === 0 && Array.isArray(JSON.parse(fa.out)) && !/thread id required/.test(fa.err));
+const fleet = JSON.parse(fa.out);
+const a1 = fleet.find((e) => e.id === FA1);
+const a2 = fleet.find((e) => e.id === FA2);
+check('status --all: FA1 shows turn=w1, 1 substantive round, 0 notes, last=1, participants',
+  a1 && a1.turn === 'w1' && a1.rounds === 1 && a1.notes === 0 && a1.messages === 1 && a1.last === 1
+    && Array.isArray(a1.participants) && a1.participants.join(',') === 'coord,w1');
+check('status --all: FA2 shows turn=coord, 0 rounds, 1 note, 1 message, last=1',
+  a2 && a2.turn === 'coord' && a2.rounds === 0 && a2.notes === 1 && a2.messages === 1 && a2.last === 1);
+check('status --all: each entry carries an updated timestamp',
+  a1 && typeof a1.updated === 'string' && a1.updated.length > 0);
+fs.mkdirSync(path.join(TMP, 'not-a-thread'), { recursive: true });
+const fa2 = await run(['status', '--all']);
+check('status --all: skips a directory with no meta.json without crashing',
+  fa2.code === 0 && !JSON.parse(fa2.out).some((e) => e.id === 'not-a-thread'));
+const singleFA1 = JSON.parse((await run(['status', '--thread', FA1])).out);
+check('status (single thread): shape unchanged - meta + rounds/messages/notes',
+  singleFA1.id === FA1 && singleFA1.rounds === 1 && singleFA1.notes === 0
+    && singleFA1.participants.join(',') === 'coord,w1');
+
 // --- kickoff teaches out-of-band notes + the checkpoint ---
 check('kickoff (non-session): explains notes do not take the turn',
   /does NOT take the turn/i.test(koN.out) && / note .*--as b/.test(koN.out));
