@@ -22,7 +22,7 @@ const SELF = path.resolve(process.argv[1]);
 const SAFE = /^[A-Za-z0-9._-]+$/; // thread ids and handles
 
 function parseArgs(argv) {
-  const out = { _: [] };
+  const out = { _: [], __unknown: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '-h') {
@@ -32,9 +32,36 @@ function parseArgs(argv) {
       const next = argv[i + 1];
       if (next === undefined || next.startsWith('--')) out[key] = true;
       else { out[key] = next; i++; }
+    } else if (a.startsWith('-')) {
+      out.__unknown.push(a);
     } else out._.push(a);
   }
   return out;
+}
+
+const commonOptions = ['root', 'thread', 'help', 'h'];
+const commandOptions = {
+  init: new Set([...commonOptions, 'participants', 'turn', 'round-cap', 'session', 'force']),
+  post: new Set([...commonOptions, 'as', 'body', 'body-file', 'force']),
+  resolve: new Set([...commonOptions, 'as', 'body', 'body-file', 'force']),
+  wait: new Set([...commonOptions, 'as', 'timeout', 'interval', 'follow']),
+  read: new Set(commonOptions),
+  status: new Set(commonOptions),
+  kickoff: new Set([...commonOptions, 'as', 'role']),
+};
+
+function validateOptions(command, args) {
+  const allowed = commandOptions[command];
+  if (!allowed) return;
+  const unknown = [
+    ...args.__unknown,
+    ...Object.keys(args)
+      .filter((key) => key !== '_' && key !== '__unknown' && !allowed.has(key))
+      .map((key) => `--${key}`),
+  ];
+  if (unknown.length) {
+    throw new Error(`athread: unknown option "${unknown[0]}" for ${command}; run ${path.basename(SELF)} help ${command} for usage`);
+  }
 }
 
 const [, , cmd, ...rest] = process.argv;
@@ -237,6 +264,7 @@ if (helpRequested) {
   printHelp(helpTopic);
   process.exit(0);
 }
+validateOptions(cmd, a);
 
 // Threads live OUTSIDE any repo by default, so they are never tracked by git.
 // Override with --root or $ATHREAD_DIR (e.g. point it at a repo or temp dir).

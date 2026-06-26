@@ -85,6 +85,14 @@ const unknownCommand = await run(['nope']);
 check('help: unknown command points to --help',
   unknownCommand.code === 1 && /unknown command/.test(unknownCommand.err) && /--help/.test(unknownCommand.err));
 
+// --- option validation ---
+const U = 'unknownflag';
+await run(['init', '--thread', U, '--participants', 'a,b']);
+const unknownFlag = await run(['post', '--thread', U, '--as', 'a', '--message', 'hi']);
+check('args: post rejects unknown --message flag',
+  unknownFlag.code === 1 && /unknown option "--message"/.test(unknownFlag.err));
+check('args: rejected unknown flag leaves no message', indices(U).length === 0);
+
 // --- core turn-taking flow ---
 const T = 'flow';
 await run(['init', '--thread', T, '--participants', 'author,reviewer']);
