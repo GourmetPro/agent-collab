@@ -385,12 +385,14 @@ function writeMessage(i, who, body, kind, force) {
   });
 }
 
-function printLatest(i) {
-  const all = msgFiles(i);
-  if (!all.length) return;
-  const f = all[all.length - 1];
-  console.log(`===== ${f} =====`);
-  console.log(fs.readFileSync(path.join(dir(i), f), 'utf8').trimEnd());
+// Print every message since the caller's last substantive post (their context
+// window), so interleaved notes are surfaced, not just the latest message.
+function printWindow(i, who) {
+  const since = lastSubstantiveIndex(i, who);
+  for (const f of msgFiles(i).filter((file) => fileIndex(file) > since)) {
+    console.log(`===== ${f} =====`);
+    console.log(fs.readFileSync(path.join(dir(i), f), 'utf8').trimEnd());
+  }
 }
 
 // Pattern-agnostic: the peer's specific job arrives in the first message it
@@ -558,13 +560,13 @@ async function main() {
       const m = readMeta(id);
       const all = msgFiles(id);
       if (m.status === 'resolved') {
-        printLatest(id);
+        printWindow(id, who);
         console.log('\n[athread] status=resolved');
         return;
       }
       if (m.turn === who && all.length) {
-        printLatest(id);
-        const round = all.length;
+        printWindow(id, who);
+        const round = substantiveFilesOf(id).length;
         const capped = m.round_cap != null && round >= m.round_cap;
         const capLabel = m.round_cap == null ? 'unlimited' : m.round_cap;
         console.log(`\n[athread] your turn (round ${round}, cap ${capLabel})${capped ? ' -- ROUND CAP reached: stop and escalate to the human' : ''}`);

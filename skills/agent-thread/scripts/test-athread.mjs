@@ -45,6 +45,13 @@ const runDirect = (dirEnv, args) => new Promise((resolve) => {
   p.stderr.on('data', (d) => (err += d));
   p.on('close', (code) => resolve({ code, out, err }));
 });
+const collect = (child) => new Promise((resolve, reject) => {
+  let out = '', err = '';
+  child.stdout.on('data', (d) => (out += d));
+  child.stderr.on('data', (d) => (err += d));
+  child.on('close', (code) => resolve({ code, out, err }));
+  child.on('error', reject);
+});
 const meta = (t) => JSON.parse(fs.readFileSync(path.join(TMP, t, 'meta.json'), 'utf8'));
 const indices = (t) => fs.readdirSync(path.join(TMP, t)).filter((f) => /^\d{4}\./.test(f)).sort().map((f) => f.slice(0, 4));
 
@@ -291,13 +298,7 @@ check('wait: session thread reports cap unlimited, never ROUND CAP', /cap unlimi
 // --- wait --follow: survives the timeout window instead of exiting ---
 const SF = 'follow';
 await run(['init', '--thread', SF, '--participants', 'a,b']);
-const followP = new Promise((resolve) => {
-  const p = spawn('node', [AT, 'wait', '--thread', SF, '--as', 'b', '--follow', '--timeout', '1', '--interval', '1'], { env });
-  let out = '', err = '';
-  p.stdout.on('data', (d) => (out += d));
-  p.stderr.on('data', (d) => (err += d));
-  p.on('close', (code) => resolve({ code, out, err }));
-});
+const followP = collect(spawn('node', [AT, 'wait', '--thread', SF, '--as', 'b', '--follow', '--timeout', '1', '--interval', '1'], { env }));
 await new Promise((r) => setTimeout(r, 2500)); // cross at least one timeout window
 await run(['post', '--thread', SF, '--as', 'a', '--body', 'late turn']);
 const fr = await followP;
@@ -353,6 +354,55 @@ check('note/dotted: a real note is 0002.~note.beta.md', dotNote.out.trim() === '
 const dotStatus2 = JSON.parse((await run(['status', '--thread', ND])).out);
 check('status/dotted: a note does not increment the substantive round count',
   dotStatus2.rounds === 1 && dotStatus2.notes === 1 && dotStatus2.messages === 2);
+
+// --- wait: notes do not wake a pending wait ---
+const NWW = 'notewake';
+await run(['init', '--thread', NWW, '--participants', 'a,b']); // turn a; b is waiting
+const waitP = spawn('node', [AT, 'wait', '--thread', NWW, '--as', 'b', '--timeout', '4', '--interval', '1'], { env });
+await new Promise((r) => setTimeout(r, 250));
+await run(['note', '--thread', NWW, '--as', 'a', '--body', 'note before handoff']); // 0001 note
+await new Promise((r) => setTimeout(r, 1250)); // cross at least one poll; a note alone must NOT return
+await run(['post', '--thread', NWW, '--as', 'a', '--body', 'now your turn']); // 0002 subst, turn b
+const waitR = await collect(waitP);
+check('wait/notes: a note does not wake wait before the turn flips',
+  waitR.code === 0
+    && /0001\.~note\.a\.md/.test(waitR.out)
+    && /0002\.a\.md/.test(waitR.out)
+    && waitR.out.indexOf('0001.~note.a.md') < waitR.out.indexOf('0002.a.md'));
+
+// --- wait: prints the window (interleaved notes) since my last substantive post ---
+const WN = 'win';
+await run(['init', '--thread', WN, '--participants', 'a,b']); // turn a
+await run(['post', '--thread', WN, '--as', 'a', '--body', 'AAA']);   // 0001 subst, turn b
+await run(['note', '--thread', WN, '--as', 'a', '--body', 'NOTE-from-a']); // 0002 note, turn still b
+await run(['post', '--thread', WN, '--as', 'b', '--body', 'BBB']);   // 0003 subst, turn a
+const winOut = await run(['wait', '--thread', WN, '--as', 'a', '--timeout', '2']);
+check('wait/window: prints every message since my last substantive post, in order',
+  /0002\.~note\.a\.md/.test(winOut.out) && /0003\.b\.md/.test(winOut.out)
+    && winOut.out.indexOf('0002.~note.a.md') < winOut.out.indexOf('0003.b.md'));
+check('wait/window: round line counts substantive only (note excluded)',
+  /your turn \(round 2, cap 15\)/.test(winOut.out));
+
+// --- a joiner with no prior post sees the whole thread from index 1 ---
+const WJ = 'winjoin';
+await run(['init', '--thread', WJ, '--participants', 'a,b']);
+await run(['post', '--thread', WJ, '--as', 'a', '--body', 'hello b']);
+const wj = await run(['wait', '--thread', WJ, '--as', 'b', '--timeout', '2']);
+check('wait/window: joiner sees the opening message', /0001\.a\.md/.test(wj.out) && /hello b/.test(wj.out));
+
+// --- round cap counts substantive posts only; notes never trip it ---
+const WC = 'wincap';
+await run(['init', '--thread', WC, '--participants', 'a,b', '--round-cap', '2']);
+await run(['post', '--thread', WC, '--as', 'a', '--body', 'm1']); // 0001 subst (round 1), turn b
+await run(['note', '--thread', WC, '--as', 'a', '--body', 'n1']); // 0002 note
+await run(['note', '--thread', WC, '--as', 'a', '--body', 'n2']); // 0003 note
+const notYetCap = await run(['wait', '--thread', WC, '--as', 'b', '--timeout', '2']);
+check('cap/notes: two notes do not trip a cap-2 thread',
+  notYetCap.code === 0 && /your turn \(round 1,/.test(notYetCap.out) && !/ROUND CAP/.test(notYetCap.out));
+await run(['post', '--thread', WC, '--as', 'b', '--body', 'm2']); // 0004 subst (round 2), turn a
+const atCap = await run(['wait', '--thread', WC, '--as', 'a', '--timeout', '2']);
+check('cap/notes: the cap trips on the 2nd substantive message',
+  /ROUND CAP/.test(atCap.out) && /round 2,/.test(atCap.out));
 
 fs.rmSync(TMP, { recursive: true, force: true });
 if (failures) { console.error(`\n${failures} check(s) failed`); process.exit(1); }
