@@ -48,7 +48,7 @@ const commandOptions = {
   resolve: new Set([...commonOptions, 'as', 'body', 'body-file', 'force']),
   wait: new Set([...commonOptions, 'as', 'timeout', 'interval', 'follow']),
   read: new Set(commonOptions),
-  status: new Set([...commonOptions, 'all']),
+  status: new Set([...commonOptions, 'all', 'open', 'participant', 'since', 'min-messages', 'max-messages']),
   kickoff: new Set([...commonOptions, 'as', 'role']),
 };
 
@@ -236,7 +236,7 @@ Example:
 
 Usage:
   ${exe} status [--root R] --thread T
-  ${exe} status [--root R] --all
+  ${exe} status [--root R] --all [filters]
 
 Options:
   --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
@@ -245,11 +245,20 @@ Options:
                          the root, each {id, participants, turn, status, rounds,
                          messages, notes, last, updated}. updated is the newest file
                          mtime; a garbled thread is flagged {id, error}, never crashes.
+  --participant <h>      (with --all) only threads where <h> is a participant.
+  --open                 (with --all) only threads whose status is open.
+  --since <iso>          (with --all) only threads with updated >= <iso>.
+  --min-messages <N>     (with --all) only threads with >= N messages.
+  --max-messages <N>     (with --all) only threads with <= N messages.
   --help                 Show this help.
+
+Filters are AND-composed; a garbled thread is dropped from a filtered result.
 
 Examples:
   ${exe} status --thread review-1
-  ${exe} status --all`,
+  ${exe} status --all
+  ${exe} status --all --participant intake --open
+  ${exe} status --all --open --since 2026-06-25 --min-messages 20`,
 
     kickoff: `${exe} kickoff - emit a one-paste launcher for the other session.
 
@@ -357,6 +366,14 @@ function posNum(val, name, { int = false } = {}) {
   const n = Number(val);
   if (!Number.isFinite(n) || n <= 0 || (int && !Number.isInteger(n))) {
     throw new Error(`athread: --${name} must be a positive ${int ? 'integer' : 'number'} (got "${val}")`);
+  }
+  return n;
+}
+function nonNegInt(val, name) {
+  if (val === true) throw new Error(`athread: --${name} requires a number`);
+  const n = Number(val);
+  if (!Number.isInteger(n) || n < 0) {
+    throw new Error(`athread: --${name} must be a non-negative integer (got "${val}")`);
   }
   return n;
 }
@@ -655,15 +672,36 @@ async function main() {
     if (a.all) {
       // Read-only fleet view: enumerate every thread dir under the root. No lock
       // (a snapshot must not block live writers); a garbled thread is flagged,
-      // never crashes the listing.
+      // never crashes the listing. Optional filters narrow it, AND-composed.
+      const wantOpen = !!a.open;
+      const wantPart = (a.participant !== undefined && a.participant !== true) ? a.participant : null;
+      const minMsgs = a['min-messages'] !== undefined ? nonNegInt(a['min-messages'], 'min-messages') : null;
+      const maxMsgs = a['max-messages'] !== undefined ? nonNegInt(a['max-messages'], 'max-messages') : null;
+      let sinceMs = null;
+      if (a.since !== undefined) {
+        if (a.since === true) throw new Error('athread: --since requires an ISO timestamp');
+        const d = new Date(a.since);
+        if (Number.isNaN(d.getTime())) throw new Error(`athread: --since must be an ISO date (got "${a.since}")`);
+        sinceMs = d.getTime();
+      }
+      const filtering = wantOpen || wantPart != null || minMsgs != null || maxMsgs != null || sinceMs != null;
       const names = fs.existsSync(root)
         ? fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort()
         : [];
       const out = [];
       for (const tid of names) {
         if (!fs.existsSync(metaPath(tid))) continue; // not a thread dir
-        try { out.push(threadSummary(tid)); }
-        catch (e) { out.push({ id: tid, error: String(e.message || e) }); }
+        let s;
+        // A garbled thread can't be matched against a predicate, so drop it when
+        // filtering; surface it as {id,error} only in the unfiltered listing.
+        try { s = threadSummary(tid); }
+        catch (e) { if (!filtering) out.push({ id: tid, error: String(e.message || e) }); continue; }
+        if (wantOpen && s.status !== 'open') continue;
+        if (wantPart != null && !s.participants.includes(wantPart)) continue;
+        if (minMsgs != null && s.messages < minMsgs) continue;
+        if (maxMsgs != null && s.messages > maxMsgs) continue;
+        if (sinceMs != null && !(s.updated && new Date(s.updated).getTime() >= sinceMs)) continue;
+        out.push(s);
       }
       console.log(JSON.stringify(out, null, 2));
     } else {

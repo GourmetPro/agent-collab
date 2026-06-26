@@ -491,6 +491,41 @@ check('kickoff (non-session): tells the peer to re-check before posting/resolvin
 check('kickoff (session): also explains out-of-band notes',
   /does NOT take the turn/i.test(koS.out) && / note .*--as b/.test(koS.out));
 
+// --- status --all filters (participant / open / since / message-count), AND-composed ---
+const G1 = 'filt-co-alice', G2 = 'filt-co-bob', G3 = 'filt-dave';
+await run(['init', '--thread', G1, '--participants', 'filtco,alice']);
+await run(['init', '--thread', G2, '--participants', 'filtco,bob']);
+await run(['init', '--thread', G3, '--participants', 'dave,erin']);
+await run(['post', '--thread', G1, '--as', 'filtco', '--body', 'm1']); // G1: 1 msg, turn alice
+await run(['post', '--thread', G1, '--as', 'alice', '--body', 'm2']);  // G1: 2 msgs, turn filtco
+await run(['post', '--thread', G2, '--as', 'filtco', '--body', 'only']); // G2: 1 msg
+await run(['resolve', '--thread', G3, '--as', 'dave', '--body', 'done']); // G3 resolved, 1 msg
+const byPart = JSON.parse((await run(['status', '--all', '--participant', 'alice'])).out);
+check('filter --participant: only threads with that handle',
+  byPart.some((t) => t.id === G1) && !byPart.some((t) => t.id === G2) && !byPart.some((t) => t.id === G3));
+const byOpen = JSON.parse((await run(['status', '--all', '--open', '--participant', 'filtco'])).out);
+check('filter --open + --participant compose (AND)',
+  byOpen.some((t) => t.id === G1) && byOpen.some((t) => t.id === G2) && !byOpen.some((t) => t.id === G3)
+    && byOpen.every((t) => t.status === 'open'));
+const byMin = JSON.parse((await run(['status', '--all', '--participant', 'filtco', '--min-messages', '2'])).out);
+check('filter --min-messages: only threads with >= N messages',
+  byMin.some((t) => t.id === G1) && !byMin.some((t) => t.id === G2));
+const byMax = JSON.parse((await run(['status', '--all', '--participant', 'filtco', '--max-messages', '1'])).out);
+check('filter --max-messages: only threads with <= N messages',
+  byMax.some((t) => t.id === G2) && !byMax.some((t) => t.id === G1));
+const byRange = JSON.parse((await run(['status', '--all', '--participant', 'filtco', '--min-messages', '1', '--max-messages', '1'])).out);
+check('filter --min/--max compose into a range', byRange.some((t) => t.id === G2) && !byRange.some((t) => t.id === G1));
+const sinceFuture = JSON.parse((await run(['status', '--all', '--participant', 'filtco', '--since', '2999-01-01T00:00:00Z'])).out);
+check('filter --since future: empty', sinceFuture.length === 0);
+const sincePast = JSON.parse((await run(['status', '--all', '--participant', 'filtco', '--since', '2000-01-01T00:00:00Z'])).out);
+check('filter --since past: includes recent threads', sincePast.some((t) => t.id === G1));
+const sinceBad = await run(['status', '--all', '--since', 'not-a-date']);
+check('filter --since: rejects a non-ISO value', sinceBad.code === 1 && /--since/.test(sinceBad.err));
+const minBad = await run(['status', '--all', '--min-messages', '-1']);
+check('filter --min-messages: rejects a negative', minBad.code === 1 && /min-messages/.test(minBad.err));
+check('status --all unfiltered: still lists the whole root',
+  JSON.parse((await run(['status', '--all'])).out).length >= 3);
+
 fs.rmSync(TMP, { recursive: true, force: true });
 if (failures) { console.error(`\n${failures} check(s) failed`); process.exit(1); }
 console.log('\nall checks passed');

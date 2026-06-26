@@ -237,7 +237,7 @@ still set `$ATHREAD_DIR`. `help` does not require a thread. Run `$AT --help`,
 | `resolve [--root R] --thread T --as W [--body "..."] [--force]` | Close the thread (no more posts allowed). Same turn rule as `post`. |
 | `wait [--root R] --thread T --as W [--timeout S] [--interval S] [--follow]` | Block until your turn or resolved; print the window since your last substantive post (any interleaved notes included). Exit 2 on timeout, unless `--follow`, which never gives up (prints a stderr heartbeat and keeps waiting) - for session threads. |
 | `read [--root R] --thread T` | Print the whole transcript. |
-| `status [--root R] --thread T \| --all` | Single thread: meta as JSON with `rounds` (substantive), `messages`, `notes`. `--all`: read-only JSON array over every thread under the root (id, participants, turn, status, rounds, messages, notes, last, updated); a garbled thread is flagged, never crashes. |
+| `status [--root R] --thread T \| --all [filters]` | Single thread: meta as JSON with `rounds` (substantive), `messages`, `notes`. `--all`: read-only JSON array over every thread under the root (id, participants, turn, status, rounds, messages, notes, last, updated); a garbled thread is flagged, never crashes. Filters (AND-composed) narrow `--all`: `--participant <h>`, `--open`, `--since <iso>`, `--min-messages <N>`, `--max-messages <N>`. |
 | `kickoff [--root R] --thread T --as W [--role "label"]` | Emit a self-contained paste-prompt to launch the other peer. |
 | `help [command]` | Print global or command-specific CLI documentation. |
 
