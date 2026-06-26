@@ -150,15 +150,26 @@ turn:
 
 - A note never changes whose turn it is, and **seeing a note never means it is
   your turn**.
-- The peer picks notes up at its next **checkpoint**: re-run `wait --as <you>`
-  at the start of your turn and again right before you `post` or `resolve`. The
-  window `wait` prints includes any notes since your last substantive post.
+- The peer picks notes up at its next **checkpoint**. The single-purpose way to
+  check is `pending --as <you>` (prints the peer's notes since your last
+  substantive post, then exits 0; never blocks, takes no turn) - run it at
+  natural checkpoints, e.g. before a `post`/`resolve` or before an expensive
+  step. (In a backgrounded `wait` loop you can also re-run `wait --as <you>`,
+  which returns immediately when it is already your turn and prints the same
+  window.)
 - Notes never wake a pending `wait` and never count toward the round cap.
 - Sending a note does **not** disturb your already-armed `wait` (the turn did
   not change), so the waiting side can forward something the human just told it
   and keep the same wait.
-- Best-effort: a note can land just after the peer's pre-post checkpoint, so a
-  "stop" may arrive one message late. For a hard stop, fall back to the human.
+- Best-effort: a note can land just after the peer's checkpoint, so a "stop" may
+  arrive one message late. For a hard stop, fall back to the human.
+- **Broadcast** the same note to several threads at once with a comma list:
+  `note --thread a,b,c --as <you> --body "..."` (best-effort fan-out, flips no
+  turns, exits nonzero if any target failed - the nonzero reports write landing,
+  not that a peer has collected it).
+- **Fleet view:** `status --all` lists every thread under the root (turn, rounds,
+  notes, last activity) - a read-only cross-check of who is at whose turn, useful
+  when one session coordinates several threads.
 
 ## The wake mechanic
 
@@ -221,11 +232,12 @@ still set `$ATHREAD_DIR`. `help` does not require a thread. Run `$AT --help`,
 |---|---|
 | `init [--root R] --thread T --participants a,b [--round-cap N] [--turn a] [--session] [--force]` | Create a thread (exactly two distinct handles). `--session` = unlimited round cap + `wait --follow` in the kickoff, for ongoing multi-topic channels. Fails if `T` already exists unless `--force`, which resets it and clears old messages. |
 | `post [--root R] --thread T --as W (--body "..." \| --body-file F) [--force]` | Add your turn; flips the turn to the peer. Rejected unless it is your turn (`--force` overrides). |
-| `note [--root R] --thread T --as W (--body "..." \| --body-file F)` | Add an out-of-band note. Does NOT change the turn; allowed regardless of whose turn it is; rejected after `resolve`. The peer sees it in its next `wait` window; notes never wake a pending `wait`, and never count toward the round cap. |
+| `note [--root R] --thread T\|a,b,c --as W (--body "..." \| --body-file F)` | Add an out-of-band note. Does NOT change the turn; allowed regardless of whose turn it is; rejected after `resolve`. The peer sees it in its next `wait` window; notes never wake a pending `wait`, and never count toward the round cap. A comma list broadcasts to several threads (best-effort; "id: file" / "id: ERROR" per thread; nonzero exit if any failed). |
+| `pending [--root R] --thread T --as W` | Non-blocking peek: print the peer's notes since your last substantive post, then exit 0 (nothing + exit 0 when none). Never blocks, never writes, takes no turn - the checkpoint primitive for a turn-holder mid-task. |
 | `resolve [--root R] --thread T --as W [--body "..."] [--force]` | Close the thread (no more posts allowed). Same turn rule as `post`. |
 | `wait [--root R] --thread T --as W [--timeout S] [--interval S] [--follow]` | Block until your turn or resolved; print the window since your last substantive post (any interleaved notes included). Exit 2 on timeout, unless `--follow`, which never gives up (prints a stderr heartbeat and keeps waiting) - for session threads. |
 | `read [--root R] --thread T` | Print the whole transcript. |
-| `status [--root R] --thread T` | Print meta as JSON: `rounds` (substantive count) plus `messages` (total) and `notes`. |
+| `status [--root R] --thread T \| --all` | Single thread: meta as JSON with `rounds` (substantive), `messages`, `notes`. `--all`: read-only JSON array over every thread under the root (id, participants, turn, status, rounds, messages, notes, last, updated); a garbled thread is flagged, never crashes. |
 | `kickoff [--root R] --thread T --as W [--role "label"]` | Emit a self-contained paste-prompt to launch the other peer. |
 | `help [command]` | Print global or command-specific CLI documentation. |
 

@@ -144,6 +144,36 @@ turn. Mechanics: notes share the one monotonic index stream but are named
 last substantive post and counts only substantive files for the cap; the pre-post
 checkpoint is best-effort, with the check-then-post race documented, not closed.
 
+## Coordinator primitives
+
+A session that coordinates N worker threads (one agent-thread per worker) needs
+three more affordances, all additive and backward-compatible:
+
+- `status --all` - a read-only JSON fleet view over every thread under the root.
+  It replaces a hand-maintained thread table and doubles as a divergence detector
+  (a thread you believe is at the worker's turn that shows as idle at yours is the
+  silent-drift signal). `updated` is the newest file mtime, not `meta.json`, so it
+  reflects a thread mid-write; a garbled thread is flagged `{id,error}`, never
+  crashes the listing; no lock is taken (a read-only snapshot must not block
+  writers).
+- `pending` - a non-blocking peek at the peer's notes since your last substantive
+  post (exit 0 always, no turn, no write). It makes "check for a stop at a
+  checkpoint" a first-class command instead of overloading `wait` (which, in a
+  foreground loop, blocks if you are wrong about turn ownership - the Codex
+  consult's point that decided this over "just use `wait --as me`").
+- `note --thread a,b,c` - broadcast one note to an explicit list. Explicit list,
+  not an ownership-based `--all`: participation is not intent (a handle is also in
+  parked, unrelated, and meta threads), so the set comes from `status --all`, not
+  the CLI. Best-effort fan-out names each target's result and exits nonzero if any
+  failed - so a dropped broadcast is visible, without a delivery-receipt (which
+  was cut: a receipt would tempt gates to depend on best-effort notes).
+
+A note delivery-receipt and an ownership-based `--all` broadcast were both
+considered and cut for those reasons. These primitives were designed in a
+three-voice brainstorm (the coordinating-parallel-sessions author, a peer
+coordinator, and a Codex consult for the foreground-harness vote) conducted over
+the agent-thread channel itself.
+
 ## Validation
 
 The core - cross-harness rendezvous through the file channel - was proven with a
