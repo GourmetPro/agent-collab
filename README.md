@@ -21,6 +21,20 @@ converge, or want two open sessions to talk without you relaying.
 - [Design notes](./skills/agent-thread/DESIGN.md)
 - CLI: [`scripts/athread.mjs`](./skills/agent-thread/scripts/athread.mjs) (zero deps, Node >= 18)
 
+### `coordinating-parallel-sessions`
+
+Coordinate N parallel agent sessions (Claude Code or Codex) from a single
+coordinator session - one session per independent, PR-sized workstream, each in
+its own git worktree and on its own `agent-thread` channel. The coordinator never
+writes the code: it scopes the streams, gates every step (plan, implement,
+review, UX-verify, PR, merge), keeps a single living handoff doc so the effort
+survives compaction, and sequences the merges to avoid shared-file conflicts.
+Triggers when you fan a large effort across several long-lived sessions and want
+each gated and merged safely - the layer on top of `agent-thread`.
+
+- [SKILL.md](./skills/coordinating-parallel-sessions/SKILL.md)
+- [Living handoff template](./skills/coordinating-parallel-sessions/references/handoff-template.md)
+
 ## Installation
 
 ```bash
