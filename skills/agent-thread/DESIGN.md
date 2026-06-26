@@ -194,7 +194,11 @@ Codex resolved - with zero human relaying after the initial paste. The CLI
 
 ## Possible future hardening
 
-- Richer `status` / a `list` command across all threads.
+- `status --all` shipped (the cross-thread fleet view). At scale (100+ threads,
+  many stale-open) the unfiltered array is noisy, so a coordinator hand-slices
+  it. A later filter would scale it: `--participant <handle>` (well-defined - it
+  is the participants column, NOT the rejected ownership-based `--all-mine`),
+  plus `--open` / `--since <iso>`. Deferred; for now filter the array by handle.
 - **fs.watch as an optional accelerator, not a replacement** (Codex's verdict):
   events coalesce/miss, are weak on network/virtual filesystems, and can fire
   before `meta.json` is fully written. A robust version would run the same turn
