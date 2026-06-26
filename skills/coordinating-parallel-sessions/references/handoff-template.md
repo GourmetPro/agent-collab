@@ -11,6 +11,21 @@ with your effort's real values.
 
 # <Effort name> coordination - handoff (compaction-safe)
 
+## Resume after compaction - do this first
+0. Env: `AT=<abs-path-to-athread.mjs>` `ROOT=<thread-root>`
+   `MY_HANDLE=<coordinator-handle>`. Constraint: <e.g. local DB only>.
+1. Re-arm waits. Use a real background task (`run_in_background:true` in Claude
+   Code), not shell `&` or `disown`, so output stays attached to the harness. If
+   a wait already fired during the gap, read its output first; a handback may be
+   waiting.
+   - A: `node "$AT" wait --root "$ROOT" --thread effort-stream-a --as "$MY_HANDLE" --follow --interval 3`
+     (bg `<task id>`, turn=<session handle>).
+   - B: PARKED - do not re-arm; I initiate next post.
+   - Peer coordinator: `node "$AT" wait --thread peer-coordinator-thread --as "$MY_HANDLE" --follow --interval 3`
+     (omit if there is no peer coordinator).
+2. Check state with `status`/`read` for each thread.
+3. Resume from the per-stream State cells and Running log.
+
 > **STATUS <date>:** <one-line current state: which streams are merged, which
 > are in review, which are blocked>.
 > **NEXT:** <the single next action and who owns it>.
@@ -38,15 +53,28 @@ enough to resume.
 ## The sessions
 All worktrees branched off the SAME base commit; each has its own install.
 
-| Session | Thread id | Worktree | Branch | Spec | Scope | State |
-|---|---|---|---|---|---|---|
-| A | `effort-stream-a` | `stream-a` | `fix/stream-a` | in thread | <scope> | implementing (turn=codex) |
-| B | `effort-stream-b` | `stream-b` | `fix/stream-b` | `specs/B.md` | <scope> | signed off, PR open |
-| C | `effort-stream-c` | `stream-c` | `feat/stream-c` | `specs/C.md` | <scope> | review: changes requested |
+| Session | Thread id | Handle (`--as`) | Worktree | Branch | Spec | Scope | State |
+|---|---|---|---|---|---|---|---|
+| A | `effort-stream-a` | `codex` | `stream-a` | `fix/stream-a` | in thread | <scope> | handshake verified; implementing (turn=codex) |
+| B | `effort-stream-b` | `codex` | `stream-b` | `fix/stream-b` | `specs/B.md` | <scope> | PARKED - do not re-arm; I initiate next post |
+| C | `effort-stream-c` | `codex` | `stream-c` | `feat/stream-c` | `specs/C.md` | <scope> | review: changes requested |
 
 **Armed background wait task ids:** B=`bw4itv2ze` (awaiting PR URL), C=`bh18ikl00`
 (on UX pass). A is at turn=claude - do NOT arm a wait on a thread already at
 turn=claude.
+
+## Peer coordinators / shared main
+Omit this section if you are the only coordinator landing into main.
+
+- **Peer channel:** `peer-coordinator-thread` (`agent-thread --session`; I am
+  `<my handle>`, peer is `<their handle>`).
+- **Peer's live streams:** <their in-flight streams plus which are idle>.
+- **Disjointness regime:** disjoint -> no-freeze plus rebase-before-PR; or
+  overlap on `<file>` -> <named-contract owner plus freeze, or serialized order>.
+- **Shared named contracts:** `<e.g. compose-output DTO>` - owner `<who>`, held
+  stable; change requires pre-merge ping.
+- **Pings owed:** me -> peer when `<my stream>` squash-merges; peer -> me when
+  `<their stream>` lands or changes my verify touchpoint.
 
 ## Merge order / conflict watch
 Shared-file collisions across branches: `<path/to/shared/schema>` (A + C),

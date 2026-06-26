@@ -13,7 +13,7 @@ description: >
   these sessions", "fan this big effort across multiple sessions and merge them
   safely". Not for one or two small changes (do those inline); not for two peers
   talking it out (use agent-thread).
-user-invocable: false
+user-invocable: true
 ---
 
 # coordinating-parallel-sessions
@@ -50,7 +50,10 @@ it; it assumes you already know the agent-thread wait/post loop.
 5. **Sequence the merges.** Identify shared-file collisions up front; merge one,
    rebase the rest onto updated main, re-run CI, merge next. See
    [Merge sequencing](#merge-sequencing).
-6. **Resolve and tear down.** Resolve a thread only when its work is MERGED and
+6. **Coordinate peer fleets when needed.** If another coordinator is also
+   landing streams into the same main branch, open a peer-coordinator channel and
+   agree on disjointness, named contracts, and landing signals before merging.
+7. **Resolve and tear down.** Resolve a thread only when its work is MERGED and
    signed off. Proactively kill idle dev servers and browsers. See
    [Resource coordination](#resource-coordination).
 
@@ -71,6 +74,7 @@ Open only the section you need.
 | Run a stream through its gates | [The pipeline](#the-pipeline-gate-every-stream) |
 | Drive the agent-thread waits as a coordinator | [agent-thread discipline](#agent-thread-discipline-for-a-coordinator) |
 | Land the PRs without conflicts | [Merge sequencing](#merge-sequencing) |
+| Share one main branch with another coordinator | [Multiple coordinators, shared main](#multiple-coordinators-shared-main) |
 | Stop the machine from melting | [Resource coordination](#resource-coordination) |
 
 ## Setup (per stream)
@@ -115,9 +119,10 @@ Rules that make the gates real:
 ## The living handoff (the key pattern)
 
 A single compaction-safe file, updated on EVERY state change (handback, approval,
-change-request, merge, decision, blocker). It holds: role and workflow rules; the
-streams table (thread id <-> worktree <-> branch <-> spec <-> scope <-> state);
-armed wait task ids; approved contracts and open decisions; merge order and the
+change-request, merge, decision, blocker). It holds: the resume-after-compaction
+runbook; role and workflow rules; the streams table (thread id <-> `--as` handle
+<-> worktree <-> branch <-> spec <-> scope <-> state); armed wait task ids and
+parked threads; approved contracts and open decisions; merge order and the
 shared-file conflict set; the canonical CI gate; a resource policy; and a dated
 running log (newest last). Goal: the file alone is enough to resume coordinating
 with full history, so compaction is cheap.
@@ -132,17 +137,41 @@ You are running many threads at once. The agent-thread loop still holds (post to
 hand back, then arm a background `wait` for your handle; the harness re-invokes
 you on the peer's turn), with multi-thread additions:
 
+- **Know the silent-void failure.** A wrong `--as` on the live thread is rejected
+  loudly by turn guards. A post to a stale-but-valid thread id can succeed while
+  no session is listening because the worker reset and rejoined under a different
+  id or handle. The handoff table catches typos; it does not prove liveness.
+- **Handshake every join or relaunch before assigning work.** The worker's first
+  post must echo `joined thread <id> as <handle>, cwd=<worktree>,
+  branch=<branch>, standing by`. Verify id, handle, cwd, and branch against the
+  handoff table, then assign the real task.
+- **Treat missing handback after a reset as a pairing problem first.** If you did
+  not get a fresh handshake, make the first post a probe. No peer turn inside a
+  normal handback window means `read`/`status` that thread and ask the USER what
+  id plus `--as` the launched session actually shows. Do not wait forever on a
+  silent worker.
+- **The coordinator owns each pairing.** On reset, re-issue `kickoff` to mint the
+  id/handle, or re-init the same id with `--force`. Do not let a worker invent a
+  replacement thread id.
 - **Never arm a wait on a thread already at `turn=claude`.** It returns
   immediately and busy-loops. Respond first; arm only after you post (which flips
   the turn back to the session).
 - **Park a signed-off or idle session by NOT re-arming** - leave it at
-  `turn=claude`. Re-engage later by posting (flips turn to the session) then
-  arming.
+  `turn=claude` and record `PARKED - do not re-arm; I initiate next post` in the
+  handoff. Re-engage later by posting (flips turn to the session) then arming.
 - **Resolve a thread only when its work is MERGED and signed off**, not at code
   signoff.
 - **Stay silent while waits are pending.** Do not narrate polling. One armed wait
   per thread at a time.
 - Track every armed wait's task id in the handoff so a restart can re-arm them.
+- **Use `note` only for out-of-band signals, when available.** Notes do not flip
+  the turn and do not replace the handback post. Use them for advisory
+  fire-and-forget signals such as "main moved; rebase before your next push" or a
+  peer-coordinator heads-up while the peer has the turn. If a worker must
+  acknowledge before continuing safely, use a turn-passing post or ask the human
+  to interrupt. A STOP note is only a request seen at the next checkpoint, not a
+  guaranteed halt. Reflect durable state in the handoff because notes are
+  ephemeral.
 
 ## Merge sequencing
 
@@ -156,6 +185,28 @@ adjacent, and rebase the second of each pair. Independent additive migrations
 (distinct timestamps and objects) do not conflict, but still flag the landing
 order. If the repo requires up-to-date branches before merge, update each branch
 just before its merge so it picks up what already landed.
+
+## Multiple coordinators, shared main
+
+Merge sequencing assumes one coordinator can see every branch. When two or more
+coordinators run separate fleets into the same main branch, add one peer
+coordinator `--session` channel and run these checks there:
+
+- **Cross-fleet disjointness check up front.** Each coordinator shares planned
+  file globs or actual touched files per branch. For existing branches,
+  `git log origin/main..HEAD --name-only` is enough.
+- **Disjoint streams: no freeze.** Rebase on latest main immediately before each
+  PR or merge, land when green, and ping the peer when main moves. This is safe
+  only because the touch sets are disjoint.
+- **Overlapping streams: name the contract or serialize.** If both fleets touch
+  the same file or API shape, either promote it to a named contract owned and
+  frozen by one side, or agree on a serial merge order for those streams. Let
+  non-overlapping streams keep flowing.
+- **Landing-signal pings are mandatory.** Announce squash merges that move main,
+  and announce when a named contract lands. The dependent side re-rebases or
+  re-verifies on that signal instead of polling.
+- **Keep visibility in the handoff.** Record the peer channel, the peer's live
+  streams, the disjointness regime, shared contracts, and pings owed.
 
 ## Know your canonical CI gate
 
@@ -196,10 +247,14 @@ will crush the machine. Enforce:
 |---|---|
 | Reviewing the session's summary instead of the diff | Always read the actual diff; the summary is a claim. |
 | Signing off on a described screenshot | Read the PNG yourself before signoff. |
+| Posting to the handoff's thread id without confirming a live listener | Require the join handshake before assigning work; a stale id can accept posts silently. |
 | Arming a wait on a thread already at `turn=claude` | Respond first; arm only after you post. |
+| Re-arming a parked thread | Record `PARKED - do not re-arm; I initiate next post`; post only when you are ready to re-engage. |
 | Resolving a thread at code signoff | Resolve only after the work is MERGED. |
 | Letting the handoff go stale | Update it on every state change; a stale handoff lies. |
 | Merging branches in arbitrary order | Identify shared-file collisions; merge-rebase-CI-merge in sequence. |
+| Assuming no-freeze is safe across peer coordinators | First prove disjoint touch sets; otherwise name and freeze a contract or serialize the overlap. |
+| Using `note` as a handback or hard stop | Notes are advisory and best-effort; use turn-passing posts for gates and human interruption for hard stops. |
 | Gating on the wrong test command | Read `.github/workflows/*`; pin the canonical gates. |
 | Leaving idle dev servers and browsers running | Kill them; serialize heavy local runs through the coordinator. |
 | Spawning the sessions yourself | The user launches each session; you set up and coordinate. |

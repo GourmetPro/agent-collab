@@ -32,6 +32,8 @@ review, UX-verify, PR, merge), keeps a single living handoff doc so the effort
 survives compaction, and sequences the merges to avoid shared-file conflicts.
 Triggers when you fan a large effort across several long-lived sessions and want
 each gated and merged safely - the layer on top of `agent-thread`.
+Invoke explicitly as `$coordinating-parallel-sessions` in Codex or
+`/coordinating-parallel-sessions` in Claude.
 
 - [SKILL.md](./skills/coordinating-parallel-sessions/SKILL.md)
 - [Living handoff template](./skills/coordinating-parallel-sessions/references/handoff-template.md)
