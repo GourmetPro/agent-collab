@@ -15,7 +15,8 @@ until resolved - so you stop copy-pasting messages between two agents. The
 channel is pattern-agnostic; it covers review, debate/decide, consult (a peer
 with different tools/model/repo), delegate a sub-task, pair (driver/navigator),
 and brainstorm. Triggers whenever you want a second agent to weigh in until you
-converge, or want two open sessions to talk without you relaying.
+converge, or want two open sessions to talk without you relaying. Either side can
+also drop an out-of-band note at any time without taking the turn.
 
 - [SKILL.md](./skills/agent-thread/SKILL.md)
 - [Design notes](./skills/agent-thread/DESIGN.md)

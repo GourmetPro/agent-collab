@@ -138,10 +138,33 @@ or escalating to the human.
   human instead of posting a pretend resolution.
 - Do not post only "done", "looks good", "waiting", or a generic summary.
 
+## Out-of-band notes
+
+Turn-taking governs the substantive handoff, but either side may drop a `note`
+at any time to add context, a correction, or a "stop" - without claiming the
+turn:
+
+```
+"$AT" note --thread <id> --as <you> --body "STOP: that path is wrong, it is /srv/app"
+```
+
+- A note never changes whose turn it is, and **seeing a note never means it is
+  your turn**.
+- The peer picks notes up at its next **checkpoint**: re-run `wait --as <you>`
+  at the start of your turn and again right before you `post` or `resolve`. The
+  window `wait` prints includes any notes since your last substantive post.
+- Notes never wake a pending `wait` and never count toward the round cap.
+- Sending a note does **not** disturb your already-armed `wait` (the turn did
+  not change), so the waiting side can forward something the human just told it
+  and keep the same wait.
+- Best-effort: a note can land just after the peer's pre-post checkpoint, so a
+  "stop" may arrive one message late. For a hard stop, fall back to the human.
+
 ## The wake mechanic
 
-`wait` polls the thread and returns the moment it is your turn. How you run it
-depends on your harness:
+`wait` polls the thread and returns the moment it is your turn. Notes never wake
+a pending `wait` - they are surfaced in the window the next time `wait` returns
+on your turn. How you run it depends on your harness:
 
 - **Claude Code:** run `wait` as a **background** Bash command. The harness
   re-invokes you when it exits, so you are woken on the peer's turn without
@@ -198,10 +221,11 @@ still set `$ATHREAD_DIR`. `help` does not require a thread. Run `$AT --help`,
 |---|---|
 | `init [--root R] --thread T --participants a,b [--round-cap N] [--turn a] [--session] [--force]` | Create a thread (exactly two distinct handles). `--session` = unlimited round cap + `wait --follow` in the kickoff, for ongoing multi-topic channels. Fails if `T` already exists unless `--force`, which resets it and clears old messages. |
 | `post [--root R] --thread T --as W (--body "..." \| --body-file F) [--force]` | Add your turn; flips the turn to the peer. Rejected unless it is your turn (`--force` overrides). |
+| `note [--root R] --thread T --as W (--body "..." \| --body-file F)` | Add an out-of-band note. Does NOT change the turn; allowed regardless of whose turn it is; rejected after `resolve`. The peer sees it in its next `wait` window; notes never wake a pending `wait`, and never count toward the round cap. |
 | `resolve [--root R] --thread T --as W [--body "..."] [--force]` | Close the thread (no more posts allowed). Same turn rule as `post`. |
-| `wait [--root R] --thread T --as W [--timeout S] [--interval S] [--follow]` | Block until your turn or resolved; print latest. Exit 2 on timeout, unless `--follow`, which never gives up (prints a stderr heartbeat and keeps waiting) - for session threads. |
+| `wait [--root R] --thread T --as W [--timeout S] [--interval S] [--follow]` | Block until your turn or resolved; print the window since your last substantive post (any interleaved notes included). Exit 2 on timeout, unless `--follow`, which never gives up (prints a stderr heartbeat and keeps waiting) - for session threads. |
 | `read [--root R] --thread T` | Print the whole transcript. |
-| `status [--root R] --thread T` | Print meta + round count as JSON. |
+| `status [--root R] --thread T` | Print meta as JSON: `rounds` (substantive count) plus `messages` (total) and `notes`. |
 | `kickoff [--root R] --thread T --as W [--role "label"]` | Emit a self-contained paste-prompt to launch the other peer. |
 | `help [command]` | Print global or command-specific CLI documentation. |
 

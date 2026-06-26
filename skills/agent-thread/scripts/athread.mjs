@@ -452,6 +452,10 @@ function kickoffPrompt({ handle, peer, threadId, role, session }) {
     ? followWaitCmd(threadId, handle)
     : `${cli('wait')} --thread ${T} --as ${H} --timeout 1800 --interval 3`;
   const postCmd = `${cli('post')} --thread ${T} --as ${H} --body-file ${shq(bodyFile)}`;
+  const noteCmd = `${cli('note')} --thread ${T} --as ${H} --body "<context, correction, or STOP>"`;
+  const notesBlock = `Out-of-band notes: either side may add a note at any time. A note does NOT take the turn, and seeing one never means it is your turn. Use it to add context, a correction, or a STOP while the peer is working:
+  ${noteCmd}
+Re-run your wait at the start of your turn and again right before you post or resolve, so you pick up any notes that arrived while you were working.`;
   const resolveCmd = `${cli('resolve')} --thread ${T} --as ${H} --body "<the outcome>"`;
   const resolveStep = session
     ? `4. If the peer says the session is over, resolve it:\n       ${resolveCmd}\n  5. Otherwise repeat from step 1.`
@@ -467,6 +471,8 @@ ${framing}
 ${skillLine}
 
 ${turnContract}
+
+${notesBlock}
 
 If the skill is unavailable, use this executable CLI fallback. It has the exact CLI path, thread id, and --as handle for this collaboration.
 Run wait as an active command or a harness-managed background terminal that preserves output and can be resumed. Do not shell-background it with &: that can detach the output from the agent.

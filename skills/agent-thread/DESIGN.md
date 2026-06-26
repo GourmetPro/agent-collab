@@ -128,6 +128,22 @@ indefinitely-open terminal is not independently resumable across sleep/cleanup.
 A "lobby" thread (peer awaits the next thread after a resolve) was considered and
 deferred - a persistent thread with explicit resolve covers the need.
 
+## Anytime notes
+
+Strict turn-taking muted the waiting side until the peer replied. `note` adds an
+out-of-band message either participant can append at any time without claiming
+the turn, so the waiting side can forward late context, a correction, or a stop.
+It is deliberately the smaller of the two options considered: full duplex (drop
+the turn gate, wake on any unseen message via a per-handle cursor) was rejected
+because its real-time benefit is illusory here - a busy agent only reads at
+checkpoints - while it would surrender the "no double-advance" invariant and add
+cursor state. Notes keep every existing guarantee: only `post`/`resolve` move the
+turn. Mechanics: notes share the one monotonic index stream but are named
+`NNNN.~note.<who>.md` (the `~` cannot appear in a handle, so a dotted handle like
+`alpha.note` is never misclassified); `wait` prints the window since the caller's
+last substantive post and counts only substantive files for the cap; the pre-post
+checkpoint is best-effort, with the check-then-post race documented, not closed.
+
 ## Validation
 
 The core - cross-harness rendezvous through the file channel - was proven with a

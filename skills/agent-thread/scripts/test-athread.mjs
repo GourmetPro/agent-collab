@@ -415,6 +415,14 @@ check('args: note rejects unknown --message flag',
   noteUnknownFlag.code === 1 && /unknown option "--message"/.test(noteUnknownFlag.err));
 check('args: rejected note leaves no message', indices('nv').length === 0);
 
+// --- kickoff teaches out-of-band notes + the checkpoint ---
+check('kickoff (non-session): explains notes do not take the turn',
+  /does NOT take the turn/i.test(koN.out) && / note .*--as b/.test(koN.out));
+check('kickoff (non-session): tells the peer to re-check before posting/resolving',
+  /before you post or resolve/i.test(koN.out));
+check('kickoff (session): also explains out-of-band notes',
+  /does NOT take the turn/i.test(koS.out) && / note .*--as b/.test(koS.out));
+
 fs.rmSync(TMP, { recursive: true, force: true });
 if (failures) { console.error(`\n${failures} check(s) failed`); process.exit(1); }
 console.log('\nall checks passed');
