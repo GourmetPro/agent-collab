@@ -129,6 +129,29 @@ Notes:
 Example:
   ${exe} post --thread review-1 --as author --body-file /tmp/reply.md`,
 
+    note: `${exe} note - append an out-of-band note without taking the turn.
+
+Usage:
+  ${exe} note [--root R] --thread T --as HANDLE (--body TEXT | --body-file FILE)
+  ${exe} note [--root R] --thread T --as HANDLE < note.md
+
+Options:
+  --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
+  --thread <id>          Thread id.
+  --as <handle>          Your participant handle.
+  --body <text>          Short one-line note body.
+  --body-file <path>     File containing the note body.
+  --help                 Show this help.
+
+Notes:
+  A note is appended WITHOUT changing whose turn it is, and may be sent
+  regardless of whose turn it is. The peer sees it in its next wait window;
+  notes never wake a pending wait. Rejected once the thread is resolved.
+  The round cap counts substantive posts only, so notes never trip escalation.
+
+Example:
+  ${exe} note --thread review-1 --as author --body "STOP: that path is wrong, it is /srv/app"`,
+
     resolve: `${exe} resolve - append a final turn and close the thread.
 
 Usage:
@@ -233,6 +256,7 @@ Usage:
 Commands:
   init       Create or reset a thread.
   post       Append your turn and hand control to the peer.
+  note       Append an out-of-band note without taking the turn.
   resolve    Append a final turn and close the thread.
   wait       Block until your turn or resolution.
   read       Print the transcript.

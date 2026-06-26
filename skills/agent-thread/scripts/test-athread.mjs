@@ -404,6 +404,17 @@ const atCap = await run(['wait', '--thread', WC, '--as', 'a', '--timeout', '2'])
 check('cap/notes: the cap trips on the 2nd substantive message',
   /ROUND CAP/.test(atCap.out) && /round 2,/.test(atCap.out));
 
+// --- note: help + option validation ---
+const noteHelp = await run(['help', 'note']);
+check('help: help note documents the out-of-band note',
+  noteHelp.code === 0 && /without taking the turn/i.test(noteHelp.out) && /--body-file/.test(noteHelp.out));
+check('help: global help lists the note command', /\n  note\s+Append an out-of-band note/.test(globalHelp.out));
+await run(['init', '--thread', 'nv', '--participants', 'a,b']);
+const noteUnknownFlag = await run(['note', '--thread', 'nv', '--as', 'a', '--message', 'x']);
+check('args: note rejects unknown --message flag',
+  noteUnknownFlag.code === 1 && /unknown option "--message"/.test(noteUnknownFlag.err));
+check('args: rejected note leaves no message', indices('nv').length === 0);
+
 fs.rmSync(TMP, { recursive: true, force: true });
 if (failures) { console.error(`\n${failures} check(s) failed`); process.exit(1); }
 console.log('\nall checks passed');
