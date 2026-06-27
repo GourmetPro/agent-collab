@@ -50,18 +50,35 @@ requested change, a merge, a decision, a new blocker. Keep each session's State
 cell current and append a dated line to the Running log. The file alone must be
 enough to resume.
 
-## The sessions
-All worktrees branched off the SAME base commit; each has its own install.
+## Stream status
+All worktrees branched off the SAME base commit; each has its own install. Keep
+this box current on every state change. The `Evidence (git)` cell is the liveness
+truth: branch, clean/dirty, last commit age, and thread turn.
 
-| Session | Thread id | Handle (`--as`) | Worktree | Branch | Spec | Scope | State |
-|---|---|---|---|---|---|---|---|
-| A | `effort-stream-a` | `codex` | `stream-a` | `fix/stream-a` | in thread | <scope> | handshake verified; implementing (turn=codex) |
-| B | `effort-stream-b` | `codex` | `stream-b` | `fix/stream-b` | `specs/B.md` | <scope> | PARKED - do not re-arm; I initiate next post |
-| C | `effort-stream-c` | `codex` | `stream-c` | `feat/stream-c` | `specs/C.md` | <scope> | review: changes requested |
+┌────────────┬──────────────────────────────────────┬────────────────────────────────────────┬────────────────────┬───────────┐
+│ Stream     │ Agent / thread / branch              │ State                                  │ Evidence (git)     │ Wait      │
+├────────────┼──────────────────────────────────────┼────────────────────────────────────────┼────────────────────┼───────────┤
+│ A - API    │ codex-a / effort-stream-a /          │ Implementing after plan approval;      │ branch fix/api,    │ bg123     │
+│            │ fix/api                              │ next handback should be diff + gates.  │ dirty, turn=codex  │           │
+├────────────┼──────────────────────────────────────┼────────────────────────────────────────┼────────────────────┼───────────┤
+│ B - UI     │ codex-b / effort-stream-b /          │ PR accepted, merge-held; parked until  │ clean tree,        │ -         │
+│            │ fix/ui                               │ the next real task or merge.           │ turn=claude        │           │
+├────────────┼──────────────────────────────────────┼────────────────────────────────────────┼────────────────────┼───────────┤
+│ C - Tests  │ codex-c / effort-stream-c /          │ Review requested changes; waiting for  │ last commit 12m,   │ bg456     │
+│            │ fix/tests                            │ updated diff.                          │ 2 files dirty      │           │
+└────────────┴──────────────────────────────────────┴────────────────────────────────────────┴────────────────────┴───────────┘
 
-**Armed background wait task ids:** B=`bw4itv2ze` (awaiting PR URL), C=`bh18ikl00`
-(on UX pass). A is at turn=claude - do NOT arm a wait on a thread already at
-turn=claude.
+**Session details:**
+- A: handle=`codex`, worktree=`stream-a`, spec=in thread, scope=<scope>.
+- B: handle=`codex`, worktree=`stream-b`, spec=`specs/B.md`, scope=<scope>.
+- C: handle=`codex`, worktree=`stream-c`, spec=`specs/C.md`, scope=<scope>.
+
+**Wait/poller re-arm commands:**
+- A: `node "$AT" wait --root "$ROOT" --thread effort-stream-a --as "$MY_HANDLE" --follow --interval 3`
+- B: PARKED - do not re-arm; I initiate next post.
+- C: `node "$AT" wait --root "$ROOT" --thread effort-stream-c --as "$MY_HANDLE" --follow --interval 3`
+
+**Revive prompts:** <path or paste text per worker, used if terminals/sessions die>.
 
 ## Peer coordinators / shared main
 Omit this section if you are the only coordinator landing into main.

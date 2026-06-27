@@ -7,12 +7,13 @@ description: >
   implement, review, UX-verify, PR, merge - instead of writing the code itself.
   For a task that decomposes into roughly 3-6 independent workstreams, each big
   enough to fill its own context window, where parallelism plus independent
-  review beats doing it inline. Triggers on asks like "I'll launch the sessions,
-  you coordinate them", "run several agents in parallel on separate branches and
-  gate each", "coordinate the sessions fixing X", "keep a living handoff across
-  these sessions", "fan this big effort across multiple sessions and merge them
-  safely". Not for one or two small changes (do those inline); not for two peers
-  talking it out (use agent-thread).
+  review beats doing it inline, or where long-running/flaky streams need active
+  liveness and recovery management. Triggers on asks like "I'll launch the
+  sessions, you coordinate them", "run several agents in parallel on separate
+  branches and gate each", "coordinate the sessions fixing X", "keep a living
+  handoff across these sessions", "fan this big effort across multiple sessions
+  and merge them safely". Not for one or two small changes (do those inline);
+  not for two peers talking it out (use agent-thread).
 user-invocable: true
 ---
 
@@ -53,7 +54,10 @@ it; it assumes you already know the agent-thread wait/post loop.
 6. **Coordinate peer fleets when needed.** If another coordinator is also
    landing streams into the same main branch, open a peer-coordinator channel and
    agree on disjointness, named contracts, and landing signals before merging.
-7. **Resolve and tear down.** Resolve a thread only when its work is MERGED and
+7. **Recover quiet streams.** Use thread state plus worktree git state to tell
+   working from deaf/stalled; salvage committed work and revive sessions when
+   needed. See [When the squad goes quiet](#when-the-squad-goes-quiet).
+8. **Resolve and tear down.** Resolve a thread only when its work is MERGED and
    signed off. Proactively kill idle dev servers and browsers. See
    [Resource coordination](#resource-coordination).
 
@@ -73,6 +77,7 @@ Open only the section you need.
 | Start or maintain the handoff doc | [The living handoff](#the-living-handoff-the-key-pattern) + `references/handoff-template.md` |
 | Run a stream through its gates | [The pipeline](#the-pipeline-gate-every-stream) |
 | Drive the agent-thread waits as a coordinator | [agent-thread discipline](#agent-thread-discipline-for-a-coordinator) |
+| Diagnose a quiet or stalled worker | [When the squad goes quiet](#when-the-squad-goes-quiet) |
 | Land the PRs without conflicts | [Merge sequencing](#merge-sequencing) |
 | Share one main branch with another coordinator | [Multiple coordinators, shared main](#multiple-coordinators-shared-main) |
 | Stop the machine from melting | [Resource coordination](#resource-coordination) |
@@ -92,7 +97,10 @@ Open only the section you need.
 
 The kickoff each session receives must name the implementation discipline you
 expect (for example "implement test-first") so the contract is explicit from
-turn one.
+turn one. It must also name the wait discipline: after EVERY post or
+interruption, rearm `wait --follow` and keep/poll the captured tool output.
+Codex-style harnesses may not auto-wake the model when a background wait
+completes.
 
 ## The pipeline (gate every stream)
 
@@ -111,6 +119,9 @@ holds the gate and does not advance the stream until satisfied.
 Rules that make the gates real:
 - **Review the diff, not the report.** A session's summary is a claim; the diff
   is the evidence. Read the diff.
+- **Resolve contracts from the code.** For shared DTOs, exported prop types,
+  migrations, route names, and helper signatures, read the actual file on the
+  worker branch. Do not rely on dispatch text or memory of the agreed contract.
 - **Verify what tests cannot catch.** Mocked boundaries (an LLM `parse`, an HTTP
   client) pass over real-world failure modes. Independently check the risky edge.
 - **Read the UX screenshots yourself.** A signoff on a described screenshot is not
@@ -120,12 +131,12 @@ Rules that make the gates real:
 
 A single compaction-safe file, updated on EVERY state change (handback, approval,
 change-request, merge, decision, blocker). It holds: the resume-after-compaction
-runbook; role and workflow rules; the streams table (thread id <-> `--as` handle
-<-> worktree <-> branch <-> spec <-> scope <-> state); armed wait task ids and
-parked threads; approved contracts and open decisions; merge order and the
-shared-file conflict set; the canonical CI gate; a resource policy; and a dated
-running log (newest last). Goal: the file alone is enough to resume coordinating
-with full history, so compaction is cheap.
+runbook; role and workflow rules; the stream status box (agent/thread/branch,
+state, git evidence, wait id); exact wait/poller re-arm commands and parked
+threads; approved contracts and open decisions; merge order and the shared-file
+conflict set; the canonical CI gate; liveness/revive notes; a resource policy;
+and a dated running log (newest last). Goal: the file alone is enough to resume
+coordinating with full history, so compaction is cheap.
 
 Start it from `references/handoff-template.md`. The discipline is not the format -
 it is updating it on every state change. A stale handoff is worse than none,
@@ -134,8 +145,8 @@ because it lies.
 ## agent-thread discipline for a coordinator
 
 You are running many threads at once. The agent-thread loop still holds (post to
-hand back, then arm a background `wait` for your handle; the harness re-invokes
-you on the peer's turn), with multi-thread additions:
+hand back, then arm a captured `wait` for your handle), with multi-thread
+additions:
 
 - **Know the silent-void failure.** A wrong `--as` on the live thread is rejected
   loudly by turn guards. A post to a stale-but-valid thread id can succeed while
@@ -156,14 +167,21 @@ you on the peer's turn), with multi-thread additions:
 - **Never arm a wait on a thread already at `turn=claude`.** It returns
   immediately and busy-loops. Respond first; arm only after you post (which flips
   the turn back to the session).
-- **Park a signed-off or idle session by NOT re-arming** - leave it at
+- **Park a signed-off or idle session by holding the turn** - leave it at
   `turn=claude` and record `PARKED - do not re-arm; I initiate next post` in the
-  handoff. Re-engage later by posting (flips turn to the session) then arming.
+  handoff. Do not send a no-op "stand by" post, because that hands the turn to a
+  worker with nothing to do. Re-engage later by posting a real task (flips turn
+  to the session) then arming.
 - **Resolve a thread only when its work is MERGED and signed off**, not at code
   signoff.
-- **Stay silent while waits are pending.** Do not narrate polling. One armed wait
-  per thread at a time.
-- Track every armed wait's task id in the handoff so a restart can re-arm them.
+- **Stay silent while waits are pending, but do not trust silence as progress.**
+  Do not narrate polling. One armed wait per thread at a time, or one poller over
+  all active threads if your harness reaps long-lived waits.
+- Track every armed wait or poller's exact command and task id in the handoff so
+  a restart or compaction can re-arm them.
+- Sweep `pending --thread <id> --as <coordinator>` for every active thread on
+  each wake, timeout, or poller heartbeat. Notes do not flip the turn, so `wait`
+  will miss checkpoint-only signals until you sweep.
 - **Use `note` only for out-of-band signals, when available.** Notes do not flip
   the turn and do not replace the handback post. Use them for advisory
   fire-and-forget signals such as "main moved; rebase before your next push" or a
@@ -172,6 +190,34 @@ you on the peer's turn), with multi-thread additions:
   to interrupt. A STOP note is only a request seen at the next checkpoint, not a
   guaranteed halt. Reflect durable state in the handoff because notes are
   ephemeral.
+
+## When the squad goes quiet
+
+Thread state alone cannot distinguish "worker is busy" from "worker is deaf".
+Use the handoff status box plus out-of-band git probes before deciding.
+
+- **Probe liveness from the worktree.** For each stream, check
+  `git -C <worktree> branch --show-current`, `git -C <worktree> status --short`,
+  `git -C <worktree> log -1 --format=%ci`, and `athread status --thread <id>`.
+  The handoff's `Evidence (git)` cell should summarize branch, dirty/clean, last
+  commit age, and turn.
+- **Interpret silence conservatively.** `turn=<worker>` + old branch + clean tree
+  + no commits past the normal cadence means a deaf or stalled worker, not
+  patience. Dirty files or new commits mean progress exists, but the stream may
+  still be stuck on a final handback or UX step.
+- **Read the worktree directly.** Gate plans, diffs, screenshots, and drafted
+  notes from the worker's checked-out files when the post channel is flaky.
+  Shared git object storage makes the branch/worktree the evidence.
+- **Salvage completed work.** If a quiet worker has committed a finished diff,
+  review it directly, run the agreed gates you need, then push/open/merge the PR
+  as coordinator mechanics. If a resumed worker has valuable uncommitted work,
+  first ask it to make a checkpoint commit before continuing.
+- **Revive the fleet deliberately.** Keep per-worker relaunch prompts in the
+  handoff. If the user is available, ask them to relaunch the affected sessions
+  into the existing threads. If the user explicitly delegated unattended recovery
+  and a stream is dead, reassign it to a scoped replacement worker/subagent in a
+  prepared worktree; the coordinator still reviews the diff and never writes the
+  implementation.
 
 ## Merge sequencing
 
@@ -232,7 +278,8 @@ will crush the machine. Enforce:
 ## When NOT to use
 
 - **One or two small changes.** Coordinating overhead exceeds the benefit - do
-  them inline.
+  them inline unless they are long-running/flaky enough to need active liveness
+  and recovery management.
 - **Two peers settling one question** (review, debate, a single delegated
   sub-task). Use agent-thread directly; you do not need the coordinator layer.
 - **Tightly coupled work that cannot be split into independent PR-sized streams.**
@@ -248,6 +295,9 @@ will crush the machine. Enforce:
 | Reviewing the session's summary instead of the diff | Always read the actual diff; the summary is a claim. |
 | Signing off on a described screenshot | Read the PNG yourself before signoff. |
 | Posting to the handoff's thread id without confirming a live listener | Require the join handshake before assigning work; a stale id can accept posts silently. |
+| Treating silence as proof of work | Probe the worker worktree and thread metadata; silence is ambiguous. |
+| Missing checkpoint notes | Sweep `pending` on every wake or poller heartbeat; notes do not wake `wait`. |
+| Sending a no-op "stand by" post | Park by holding `turn=claude`; re-engage only with a real task. |
 | Arming a wait on a thread already at `turn=claude` | Respond first; arm only after you post. |
 | Re-arming a parked thread | Record `PARKED - do not re-arm; I initiate next post`; post only when you are ready to re-engage. |
 | Resolving a thread at code signoff | Resolve only after the work is MERGED. |
@@ -256,5 +306,6 @@ will crush the machine. Enforce:
 | Assuming no-freeze is safe across peer coordinators | First prove disjoint touch sets; otherwise name and freeze a contract or serialize the overlap. |
 | Using `note` as a handback or hard stop | Notes are advisory and best-effort; use turn-passing posts for gates and human interruption for hard stops. |
 | Gating on the wrong test command | Read `.github/workflows/*`; pin the canonical gates. |
+| Trusting a contract from memory | Read the exported type/schema/helper in the worker branch. |
 | Leaving idle dev servers and browsers running | Kill them; serialize heavy local runs through the coordinator. |
-| Spawning the sessions yourself | The user launches each session; you set up and coordinate. |
+| Spawning the sessions yourself | Normal mode: the user launches each session. Only use a scoped replacement worker/subagent in explicit unattended degraded mode. |

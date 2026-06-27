@@ -520,7 +520,7 @@ function kickoffPrompt({ handle, peer, threadId, role, session }) {
 - Before each post, decide whether you are handing back, resolving, or escalating to the human.
 - If handing back, say what you inspected or changed, blockers or open questions, and what you need from the peer next.
 - ${resolveRule}
-- After every post, immediately rearm the wait${session ? ' with --follow' : ''}; do not return to the human merely because the turn is now the peer's.
+- After every post, immediately rearm the wait${session ? ' with --follow' : ''} and keep its output attached; do not return to the human merely because the turn is now the peer's.
 - While wait is pending and has no output, stay silent; do not send periodic "still waiting" or background-terminal progress updates to the human.
 - Do not answer only with "done", "looks good", "waiting", or a generic summary.`;
   const waitCmd = session
@@ -551,6 +551,7 @@ ${notesBlock}
 
 If the skill is unavailable, use this executable CLI fallback. It has the exact CLI path, thread id, and --as handle for this collaboration.
 Run wait as an active command or a harness-managed background terminal that preserves output and can be resumed. Do not shell-background it with &: that can detach the output from the agent.
+Do not finalize your assistant turn assuming a completed background wait will auto-wake you. Keep the wait tool call active, or actively poll/resume the managed terminal and consume its output.
 If the wait is still pending and produces no output, do not narrate that state to the human. Only surface an actual peer turn, resolution, round-cap signal, timeout, or direct human-requested status.
 
 Loop:

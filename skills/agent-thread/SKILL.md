@@ -48,9 +48,10 @@ means. The mechanics below are identical for all of them.
      [pattern](#collaboration-patterns) (or improvise) and run
      [the loop](#running-a-collaboration-initiator).
 3. Loop to convergence, honoring the [escalation rules](#escalation--termination).
-4. After every non-resolving `post`, immediately rearm `wait` for your handle.
-   Do not report back to the human merely because the turn is now the peer's,
-   and do not narrate empty polling while `wait` is still pending.
+4. After every non-resolving `post`, immediately rearm `wait` for your handle
+   and keep its output attached to the agent. Do not report back to the human
+   merely because the turn is now the peer's, and do not narrate empty polling
+   while `wait` is still pending.
 5. When the thread resolves (or escalates), report the outcome to the human in
    one short summary.
 
@@ -126,11 +127,19 @@ or escalating to the human.
   peer next.
 - After a handoff `post`, immediately rearm `wait` for your own handle. On a
   session thread, this means `wait --follow` (or re-running the same captured
-  wait if your harness reaped it). Do not stop at `status` or tell the human
+  wait if your harness reaped it). Keep the command as an active captured tool
+  session, or poll/resume that tool session until you consume its output. Do not
+  stop at `status`, finalize with an unobserved wait pending, or tell the human
   "turn is now <peer>" while the thread remains open.
 - While an armed `wait` is still pending and has produced no peer turn,
   resolution, or timeout, stay silent. Do not send periodic "still waiting",
   "no output yet", or background-terminal progress updates to the human.
+- Do not send courtesy no-op handoffs such as "stand by" or "nothing pending".
+  If the peer has handed control to you and you have no next task, hold the turn
+  and leave the peer's wait armed. If you accidentally receive a no-op while a
+  session must remain open, either post a real next task, resolve, or pass the
+  turn back once and immediately rearm; never idle indefinitely while holding
+  the turn.
 - Use `resolve` only when the opening resolve condition is satisfied and no peer
   action remains. For `init --session`, resolve only when the whole session is
   over.
@@ -157,6 +166,9 @@ turn:
   step. (In a backgrounded `wait` loop you can also re-run `wait --as <you>`,
   which returns immediately when it is already your turn and prints the same
   window.)
+- If you coordinate several threads, sweep `pending --as <you>` on every wake,
+  timeout, or re-arm cycle. `wait` returns only on a turn flip or resolution; it
+  will not wake you for checkpoint notes such as "contract frozen".
 - Notes never wake a pending `wait` and never count toward the round cap.
 - Sending a note does **not** disturb your already-armed `wait` (the turn did
   not change), so the waiting side can forward something the human just told it
@@ -173,27 +185,33 @@ turn:
 
 ## The wake mechanic
 
-`wait` polls the thread and returns the moment it is your turn. Notes never wake
-a pending `wait` - they are surfaced in the window the next time `wait` returns
-on your turn. How you run it depends on your harness:
+`wait` polls the thread and returns the moment it is your turn. If the turn is
+already yours, an immediate successful return is normal; reserve nonzero exits
+for timeout or invalid state. Notes never wake a pending `wait` - they are
+surfaced in the window the next time `wait` returns on your turn. How you run it
+depends on your harness:
 
-- **Claude Code:** run `wait` as a **background** Bash command. The harness
-  re-invokes you when it exits, so you are woken on the peer's turn without
-  burning a foreground turn polling. When notified, read the command's output
-  file, act, post, and background another `wait`.
+- **Claude Code:** a harness-managed background `wait` can wake you when it
+  exits, but it can also be reaped at idle boundaries or compaction. Record the
+  exact re-arm command, read any captured output before re-arming, and consider
+  bounded waits or a status poller when coordinating many threads.
 - **Codex / other:** keep `wait` tied to a tool session whose output the harness
-  will preserve. A foreground command is the simple version; a harness-managed
-  background terminal is also fine if the harness can wait on it, resume it, and
-  show the printed turn. Do not shell-background `wait` with `&` (it can detach
-  the output from the agent). If the terminal is reaped, just re-run the same
-  `wait`. For a session thread, use `wait --follow`; a finite `--timeout` is
-  only a fallback and must be rearmed before reporting back to the human. This
-  is about captured tool output, not OS window focus.
+  preserves, and do not end your assistant turn assuming a completed background
+  wait will auto-wake the model. A foreground command is the simple version; a
+  harness-managed terminal is fine if you actively poll/resume it and consume the
+  printed turn. Do not shell-background `wait` with `&` (it can detach the output
+  from the agent). If the terminal is reaped, just re-run the same `wait`. For a
+  session thread, use `wait --follow`; a finite `--timeout` is only a fallback
+  and must be rearmed before reporting back to the human. This is about captured
+  tool output, not OS window focus.
 
 For every harness, run one captured `wait` at a time and treat silence as the
-expected pending state. If you must poll a managed terminal to collect output,
-poll at the coarsest practical cadence and only surface a real peer turn,
-resolution, round-cap signal, timeout, or direct human-requested status.
+expected pending state, not proof that the peer is working. Keep the blocking
+`wait` as its own command; do not pipe it through commands like `head`, which can
+turn a blocker into an instant no-op. If you must poll a managed terminal to
+collect output, poll at the coarsest practical cadence and only surface a real
+peer turn, resolution, round-cap signal, timeout, or direct human-requested
+status.
 
 Either way, after you `post`, the turn is the peer's; immediately rearm your
 next `wait` so it returns when they hand it back.
