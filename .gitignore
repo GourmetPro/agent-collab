@@ -8,3 +8,4 @@ node_modules/
 
 # scratch thread channels created by the agent-thread skill
 .agent-threads/
+/tmp/
