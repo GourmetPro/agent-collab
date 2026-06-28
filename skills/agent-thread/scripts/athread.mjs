@@ -46,7 +46,7 @@ const commandOptions = {
   note: new Set([...commonOptions, 'as', 'body', 'body-file']),
   pending: new Set([...commonOptions, 'as']),
   resolve: new Set([...commonOptions, 'as', 'body', 'body-file', 'force']),
-  wait: new Set([...commonOptions, 'as', 'timeout', 'interval', 'follow']),
+  wait: new Set([...commonOptions, 'as', 'timeout', 'interval', 'follow', 'probe']),
   read: new Set(commonOptions),
   status: new Set([...commonOptions, 'all', 'open', 'participant', 'since', 'min-messages', 'max-messages']),
   kickoff: new Set([...commonOptions, 'as', 'role']),
@@ -200,6 +200,7 @@ Example:
 Usage:
   ${exe} wait [--root R] --thread T --as HANDLE [--timeout S] [--interval S]
   ${exe} wait [--root R] --thread T --as HANDLE --follow [--timeout S] [--interval S]
+  ${exe} wait [--root R] --thread T --as HANDLE --probe
 
 Options:
   --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
@@ -208,6 +209,8 @@ Options:
   --timeout <seconds>    Timeout window. Default: 1800. Exit 2 on timeout.
   --interval <seconds>   Filesystem polling interval. Default: 3.
   --follow               Never exit on timeout; print a periodic stderr heartbeat.
+  --probe                Single-shot, non-blocking: check once and return now.
+                         Cannot combine with --follow (--timeout/--interval unused).
   --help                 Show this help.
 
 Output:
@@ -215,9 +218,17 @@ Output:
   When resolved, prints the latest message and status=resolved.
   While pending, wait prints no stdout. Treat silence as expected.
 
+Exit codes:
+  0   Your turn (window printed) or the thread is resolved.
+  2   Timed out waiting (blocking mode only; --follow never times out).
+  3   --probe only: not yet your turn (peer still holds it). No output; not an
+      error - a self-polling worker can keep working and probe again later.
+  1   Usage or state error.
+
 Examples:
   ${exe} wait --thread review-1 --as author
-  ${exe} wait --thread daily --as codex --follow --interval 3`,
+  ${exe} wait --thread daily --as codex --follow --interval 3
+  ${exe} wait --thread daily --as codex --probe   # poll once; exit 3 if not yet your turn`,
 
     read: `${exe} read - print the whole transcript.
 
@@ -494,6 +505,29 @@ function printWindow(i, who) {
   }
 }
 
+// Single-shot check used by both the blocking wait loop and the non-blocking
+// --probe: if the thread is resolved or it is `who`'s turn (with something to
+// read), print the window + status line and return true. Otherwise return false
+// without printing, so the caller decides whether to keep waiting (loop) or exit
+// with the "not yet your turn" sentinel (probe).
+function emitTurnOrResolved(i, who) {
+  const m = readMeta(i);
+  if (m.status === 'resolved') {
+    printWindow(i, who);
+    console.log('\n[athread] status=resolved');
+    return true;
+  }
+  if (m.turn === who && msgFiles(i).length) {
+    printWindow(i, who);
+    const round = substantiveFilesOf(i).length;
+    const capped = m.round_cap != null && round >= m.round_cap;
+    const capLabel = m.round_cap == null ? 'unlimited' : m.round_cap;
+    console.log(`\n[athread] your turn (round ${round}, cap ${capLabel})${capped ? ' -- ROUND CAP reached: stop and escalate to the human' : ''}`);
+    return true;
+  }
+  return false;
+}
+
 // Pattern-agnostic: the peer's specific job arrives in the first message it
 // waits for. This prompt only teaches the mechanics + the loop. An optional
 // freeform --role label (e.g. "reviewer", "backend API owner", "navigator")
@@ -730,26 +764,25 @@ async function main() {
       throw new Error(`athread: "${who}" is not a participant of ${id} (${m0.participants.join(', ')})`);
     }
     const follow = !!a.follow; // never give up on timeout; persist across idle gaps
+    const probe = !!a.probe; // single-shot: check once, never block
+    if (probe && follow) {
+      throw new Error('athread: --probe is single-shot; do not combine it with --follow');
+    }
+    if (probe) {
+      // Non-blocking peek at turn ownership for a self-polling worker loop: print
+      // and exit 0 when it is your turn or the thread resolved, else exit 3 (a
+      // distinct "not yet your turn" sentinel - NOT a timeout/error). Lets a
+      // harness that does not auto-wake on a backgrounded wait poll cheaply
+      // without misreading a healthy "still the peer's turn" as a stall.
+      if (emitTurnOrResolved(id, who)) return;
+      process.exit(3);
+    }
     const timeout = (a.timeout === undefined ? 1800 : posNum(a.timeout, 'timeout')) * 1000;
     const interval = (a.interval === undefined ? 3 : posNum(a.interval, 'interval')) * 1000;
     const start = Date.now();
     let windowStart = Date.now();
     for (;;) {
-      const m = readMeta(id);
-      const all = msgFiles(id);
-      if (m.status === 'resolved') {
-        printWindow(id, who);
-        console.log('\n[athread] status=resolved');
-        return;
-      }
-      if (m.turn === who && all.length) {
-        printWindow(id, who);
-        const round = substantiveFilesOf(id).length;
-        const capped = m.round_cap != null && round >= m.round_cap;
-        const capLabel = m.round_cap == null ? 'unlimited' : m.round_cap;
-        console.log(`\n[athread] your turn (round ${round}, cap ${capLabel})${capped ? ' -- ROUND CAP reached: stop and escalate to the human' : ''}`);
-        return;
-      }
+      if (emitTurnOrResolved(id, who)) return;
       if (Date.now() - windowStart > timeout) {
         if (follow) {
           const mins = Math.round((Date.now() - start) / 60000);

@@ -204,6 +204,14 @@ depends on your harness:
   session thread, use `wait --follow`; a finite `--timeout` is only a fallback
   and must be rearmed before reporting back to the human. This is about captured
   tool output, not OS window focus.
+- **If your harness does not wake you when a backgrounded `wait` completes**, you
+  must self-poll. `wait --probe` is the primitive for that: a single-shot,
+  non-blocking check that exits 0 and prints the peer's turn when it is yours (or
+  the thread resolved), and exits 3 - distinct from a timeout - when the peer
+  still holds the turn. Run it at your own checkpoints between work; exit 0 means
+  drain and act, exit 3 means keep working and probe again later. It never blocks,
+  so it cannot misread a healthy "still the peer's turn" as a stall the way a tiny
+  `--timeout` would (that returns exit 2, "escalate to the human").
 
 For every harness, run one captured `wait` at a time and treat silence as the
 expected pending state, not proof that the peer is working. Keep the blocking
@@ -254,6 +262,7 @@ still set `$ATHREAD_DIR`. `help` does not require a thread. Run `$AT --help`,
 | `pending [--root R] --thread T --as W` | Non-blocking peek: print the peer's notes since your last substantive post, then exit 0 (nothing + exit 0 when none). Never blocks, never writes, takes no turn - the checkpoint primitive for a turn-holder mid-task. |
 | `resolve [--root R] --thread T --as W [--body "..."] [--force]` | Close the thread (no more posts allowed). Same turn rule as `post`. |
 | `wait [--root R] --thread T --as W [--timeout S] [--interval S] [--follow]` | Block until your turn or resolved; print the window since your last substantive post (any interleaved notes included). Exit 2 on timeout, unless `--follow`, which never gives up (prints a stderr heartbeat and keeps waiting) - for session threads. |
+| `wait [--root R] --thread T --as W --probe` | Single-shot, non-blocking turn check: exit 0 + print the window when it is your turn (or resolved), else exit 3 (peer still holds the turn - not an error, nothing printed). For a self-polling loop on a harness that does not auto-wake on a backgrounded `wait`. Cannot combine with `--follow`. |
 | `read [--root R] --thread T` | Print the whole transcript. |
 | `status [--root R] --thread T \| --all [filters]` | Single thread: meta as JSON with `rounds` (substantive), `messages`, `notes`. `--all`: read-only JSON array over every thread under the root (id, participants, turn, status, rounds, messages, notes, last, updated); a garbled thread is flagged, never crashes. Filters (AND-composed) narrow `--all`: `--participant <h>`, `--open`, `--since <iso>`, `--min-messages <N>`, `--max-messages <N>`. |
 | `kickoff [--root R] --thread T --as W [--role "label"]` | Emit a self-contained paste-prompt to launch the other peer. |

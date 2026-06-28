@@ -170,6 +170,24 @@ check('wait: returns on your turn', wt.code === 0 && /your turn/.test(wt.out));
 const wto = await run(['wait', '--thread', T2, '--as', 'a', '--timeout', '1', '--interval', '1']);
 check('wait: exit 2 on timeout', wto.code === 2);
 
+// --- wait --probe: single-shot, non-blocking turn check (self-polling workers) ---
+// T2 is at turn=b (a posted "over to you"). Probe must not block either way.
+const probeMine = await run(['wait', '--thread', T2, '--as', 'b', '--probe']);
+check('probe: exit 0 + prints the window when it is your turn',
+  probeMine.code === 0 && /your turn/.test(probeMine.out) && /over to you/.test(probeMine.out));
+const probeNotMine = await run(['wait', '--thread', T2, '--as', 'a', '--probe']);
+check('probe: exit 3 with no stdout when the peer still holds the turn',
+  probeNotMine.code === 3 && probeNotMine.out.trim() === '');
+const probeResolved = await run(['wait', '--thread', T, '--as', 'author', '--probe']);
+check('probe: exit 0 + status=resolved on a resolved thread',
+  probeResolved.code === 0 && /status=resolved/.test(probeResolved.out));
+const probeFollow = await run(['wait', '--thread', T2, '--as', 'b', '--probe', '--follow']);
+check('probe: rejects --probe combined with --follow',
+  probeFollow.code === 1 && /single-shot/.test(probeFollow.err));
+const probeStranger = await run(['wait', '--thread', T2, '--as', 'stranger', '--probe']);
+check('probe: rejects a non-participant (exit 1, not the sentinel)',
+  probeStranger.code === 1 && /not a participant/.test(probeStranger.err));
+
 // --- numeric arg validation (a bad timeout must fail fast, not hang) ---
 const badTimeout = await run(['wait', '--thread', T2, '--as', 'a', '--timeout', 'nope', '--interval', '1']);
 check('wait: rejects non-numeric timeout (no hang)', badTimeout.code === 1 && /timeout/.test(badTimeout.err));

@@ -161,6 +161,15 @@ three more affordances, all additive and backward-compatible:
   checkpoint" a first-class command instead of overloading `wait` (which, in a
   foreground loop, blocks if you are wrong about turn ownership - the Codex
   consult's point that decided this over "just use `wait --as me`").
+- `wait --probe` - a single-shot, non-blocking turn check: exit 0 (+ window) when
+  it is your turn or the thread resolved, exit 3 when the peer still holds it.
+  `pending` answers "any new notes?"; `--probe` answers "did the turn flip to me?".
+  It exists because a harness that does not re-invoke the model when a backgrounded
+  `wait` completes (observed with Codex `exec` workers) must self-poll, and a tiny
+  `--timeout` is the wrong tool: timeout exits 2 ("peer stalled, escalate"), so a
+  worker polling a still-busy peer would keep false-escalating. Exit 3 is a
+  dedicated "not yet your turn, not an error" sentinel, distinct from both the
+  exit-2 timeout and the exit-1 usage error, so a self-poll loop reads it cleanly.
 - `note --thread a,b,c` - broadcast one note to an explicit list. Explicit list,
   not an ownership-based `--all`: participation is not intent (a handle is also in
   parked, unrelated, and meta threads), so the set comes from `status --all`, not

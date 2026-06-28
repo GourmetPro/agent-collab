@@ -32,7 +32,8 @@ with your effort's real values.
 
 **Role:** I (the coordinator, in the `<coordinator-worktree>` worktree) coordinate
 N parallel sessions. I do NOT write the implementation. Planning model = <hybrid /
-single>; fan-out = <N> streams.
+single>; fan-out = <N> streams. **Mode:** <attended / unattended - user launched
+the sessions then left>.
 
 **Workflow rules:**
 - I do NOT spawn the sessions. The USER launches each session in its worktree and
@@ -43,6 +44,12 @@ single>; fan-out = <N> streams.
   running app + screenshots) -> I review the screenshots -> once satisfied, the
   session opens its own PR -> CI runs -> I sequence merge order and merge when CI
   is green.
+- One complete handback per round: I bundle every actionable item (CI fix + UX
+  polish + rebase) into a single post; I never post-then-amend with a note.
+- **Unattended only:** workers NEVER escalate. A worker that hits a command it
+  cannot self-approve POSTs me the exact command + cwd + reason; I (attended) run
+  it and return the output. Each worker keeps its own `tmp/HANDOFF.md` with that
+  no-escalation rule on line 1.
 
 ## Maintenance protocol (KEEP THIS FILE LIVE)
 Update this handoff on EVERY meaningful state change - a handback, an approval, a

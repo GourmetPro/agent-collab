@@ -56,7 +56,10 @@ it; it assumes you already know the agent-thread wait/post loop.
    agree on disjointness, named contracts, and landing signals before merging.
 7. **Recover quiet streams.** Use thread state plus worktree git state to tell
    working from deaf/stalled; salvage committed work and revive sessions when
-   needed. See [When the squad goes quiet](#when-the-squad-goes-quiet).
+   needed. See [When the squad goes quiet](#when-the-squad-goes-quiet). When the
+   user launches the sessions then leaves, also run the
+   [Unattended runs](#unattended-runs) rules: workers never escalate (they route
+   privileged commands to you), and each keeps its own compaction-safe handoff.
 8. **Resolve and tear down.** Resolve a thread only when its work is MERGED and
    signed off. Proactively kill idle dev servers and browsers. See
    [Resource coordination](#resource-coordination).
@@ -78,6 +81,7 @@ Open only the section you need.
 | Run a stream through its gates | [The pipeline](#the-pipeline-gate-every-stream) |
 | Drive the agent-thread waits as a coordinator | [agent-thread discipline](#agent-thread-discipline-for-a-coordinator) |
 | Diagnose a quiet or stalled worker | [When the squad goes quiet](#when-the-squad-goes-quiet) |
+| Run a fleet the user launched then left | [Unattended runs](#unattended-runs) |
 | Land the PRs without conflicts | [Merge sequencing](#merge-sequencing) |
 | Share one main branch with another coordinator | [Multiple coordinators, shared main](#multiple-coordinators-shared-main) |
 | Stop the machine from melting | [Resource coordination](#resource-coordination) |
@@ -95,12 +99,22 @@ Open only the section you need.
 - **A spec per stream** (or in-thread for the one complex stream).
 - **Distinct dev-server PORT per worktree** so parallel servers do not collide.
 
-The kickoff each session receives must name the implementation discipline you
-expect (for example "implement test-first") so the contract is explicit from
-turn one. It must also name the wait discipline: after EVERY post or
-interruption, rearm `wait --follow` and keep/poll the captured tool output.
-Codex-style harnesses may not auto-wake the model when a background wait
-completes.
+The kickoff each session receives must name the contract explicitly from turn
+one:
+
+- **Implementation discipline** you expect (for example "implement test-first").
+- **Wait discipline.** After EVERY post or interruption, rearm `wait --follow`
+  and keep/poll the captured tool output. Codex-style harnesses may not auto-wake
+  the model when a background wait completes, so the worker must self-poll - a
+  `wait --probe` between work chunks returns exit 0 (drain and act) or exit 3
+  (still the peer's turn; keep working), without the false-stall risk of a tiny
+  `--timeout`.
+- **Own-handoff discipline.** Each worker keeps its OWN compaction-safe
+  `tmp/HANDOFF.md` in its worktree, updated as it goes and re-read after each of
+  its own compactions - the same habit the coordinator uses, mirrored per worker.
+- **For unattended runs, the no-escalation rule** (see
+  [Unattended runs](#unattended-runs)) goes in the kickoff and as the FIRST line
+  of the worker's `tmp/HANDOFF.md`, so it survives the worker's own compaction.
 
 ## The pipeline (gate every stream)
 
@@ -190,6 +204,17 @@ additions:
   to interrupt. A STOP note is only a request seen at the next checkpoint, not a
   guaranteed halt. Reflect durable state in the handoff because notes are
   ephemeral.
+- **One complete handback per round; do not post-then-amend.** Bundle everything
+  actionable for the worker - CI fixes, UX polish, rebase instructions - into a
+  single turn-passing post, so a round finishes in one worker pass. The trap: you
+  post, then notice more work and send it as a `note`; the worker's `wait`
+  returned on your post, it works exactly the posted items, and never reads the
+  follow-up note (for a Codex worker mid-round a note is functionally invisible
+  until a human makes it run `pending`). Re-read the diff, CI, and mockup BEFORE
+  posting - that is cheaper than a missed note plus a human nudge plus a partial
+  round. If you genuinely must add work after handing off, prefer letting it ride
+  as the next round's post; only use a note plus an explicit human nudge if it
+  must land in the current round.
 
 ## When the squad goes quiet
 
@@ -218,6 +243,52 @@ Use the handoff status box plus out-of-band git probes before deciding.
   and a stream is dead, reassign it to a scoped replacement worker/subagent in a
   prepared worktree; the coordinator still reviews the diff and never writes the
   implementation.
+
+## Unattended runs
+
+When the user launches the worker sessions and then leaves, the coordinator
+session is the only attended one. Two rules turn an unattended fleet from
+fragile to reliable; put both in every worker kickoff.
+
+- **No worker may escalate or block on an approval prompt.** No human is watching
+  the worker session, so a command that needs a permission grant the worker
+  cannot give itself (a sandbox/permission escalation, a denied command, a
+  privileged `git`/`gh` op, anything `--admin`) must NOT pop a dialog into an
+  empty room - that stalls forever and looks identical to "slow". Instead the
+  worker POSTs the coordinator the exact command + cwd + reason and passes the
+  turn. **The coordinator runs it** (the coordinator's session is attended) and
+  returns the output. Expect inbound "please run X" posts and be ready to be the
+  fleet's hands for anything needing real permissions.
+- **Each worker keeps its own compaction-safe `tmp/HANDOFF.md`** in its worktree
+  (gitignored `tmp/` is per-worktree), updated as it goes and re-read after each
+  of its own compactions. The FIRST line must be the no-escalation rule, so a
+  freshly compacted worker does not re-learn to block on approval. A minimal top:
+
+  ```
+  # <thread> handoff (compaction-safe)
+  ## RULE #1 - NEVER ESCALATE: no human is watching. If a command needs approval
+  ## I can't grant, POST lead the exact command + cwd and ask lead to run it.
+  ## Task: <one line>   Branch / worktree: <branch> / <path>
+  ## State (newest last):  - <ts> did/ran X (result) / blocked on Y
+  ## Next: <one line>
+  ```
+
+- **Deliver these rules via the kickoff post, not a note.** A note does not wake
+  a parked `wait` and a Codex worker will not sweep it, so a note is the wrong
+  channel for anything actionable - the protocol must be in the kickoff (and
+  re-stated on task posts). See
+  [one complete handback per round](#agent-thread-discipline-for-a-coordinator).
+- **Diagnosing an escalation-blocked worker vs a deaf one.** Both show
+  `turn=<worker>` + no new post. The tell is the worktree: an escalation-blocked
+  worker often has a dirty tree / partial work and a shell waiting on a prompt; a
+  wait-deaf worker is pristine on the old branch. Either way a human nudge
+  unblocks the moment; the durable fix is the no-escalation rule above.
+- **Do not pre-emptively abandon the cheaper fleet.** Codex workers cost far
+  fewer tokens, which matters across a multi-stream fleet, and an interactive
+  Codex session left polling its own wait can run unattended. Hedge with a short
+  liveness deadline (a `Monitor` on the worker's worktree branch + dirty state
+  that emits progress-or-stall), and pivot a stream to a Claude subagent only on
+  a real, confirmed stall - not on the first quiet window.
 
 ## Merge sequencing
 
@@ -305,6 +376,9 @@ will crush the machine. Enforce:
 | Merging branches in arbitrary order | Identify shared-file collisions; merge-rebase-CI-merge in sequence. |
 | Assuming no-freeze is safe across peer coordinators | First prove disjoint touch sets; otherwise name and freeze a contract or serialize the overlap. |
 | Using `note` as a handback or hard stop | Notes are advisory and best-effort; use turn-passing posts for gates and human interruption for hard stops. |
+| Posting a handback, then amending it with a note | Bundle everything actionable into one complete post per round; a Codex worker mid-round never reads the follow-up note. |
+| Letting an unattended worker block on an approval prompt | Kickoff rule: the worker posts you the command + cwd + reason; you (the attended session) run it and return output. |
+| Pre-emptively abandoning the Codex fleet on first silence | Probe liveness; pivot a stream to a subagent only on a confirmed stall - Codex workers are the cheaper fleet. |
 | Gating on the wrong test command | Read `.github/workflows/*`; pin the canonical gates. |
 | Trusting a contract from memory | Read the exported type/schema/helper in the worker branch. |
 | Leaving idle dev servers and browsers running | Kill them; serialize heavy local runs through the coordinator. |
