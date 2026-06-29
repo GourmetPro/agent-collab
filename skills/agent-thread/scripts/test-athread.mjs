@@ -187,6 +187,11 @@ check('probe: rejects --probe combined with --follow',
 const probeStranger = await run(['wait', '--thread', T2, '--as', 'stranger', '--probe']);
 check('probe: rejects a non-participant (exit 1, not the sentinel)',
   probeStranger.code === 1 && /not a participant/.test(probeStranger.err));
+const FRESH = 'fresh-probe';
+await run(['init', '--thread', FRESH, '--participants', 'a,b']);
+const probeFreshTurn = await run(['wait', '--thread', FRESH, '--as', 'a', '--probe']);
+check('probe: exit 0 when you already hold the turn on an empty thread',
+  probeFreshTurn.code === 0 && /your turn/.test(probeFreshTurn.out));
 
 // --- numeric arg validation (a bad timeout must fail fast, not hang) ---
 const badTimeout = await run(['wait', '--thread', T2, '--as', 'a', '--timeout', 'nope', '--interval', '1']);
@@ -543,6 +548,71 @@ const minBad = await run(['status', '--all', '--min-messages', '-1']);
 check('filter --min-messages: rejects a negative', minBad.code === 1 && /min-messages/.test(minBad.err));
 check('status --all unfiltered: still lists the whole root',
   JSON.parse((await run(['status', '--all'])).out).length >= 3);
+
+// --- sweep: turn-start safety net; diff a named set against last-seen state ---
+const SW1 = 'sw-1', SW2 = 'sw-2', SW3 = 'sw-3';
+await run(['init', '--thread', SW1, '--participants', 'lead,w1']); // turn lead
+await run(['init', '--thread', SW2, '--participants', 'lead,w2']); // turn lead
+await run(['init', '--thread', SW3, '--participants', 'lead,w3']); // turn lead
+const SWSTATE = path.join(TMP, 'sw-state.json');
+const swArgs = ['sweep', '--thread', `${SW1},${SW2},${SW3}`, '--as', 'lead', '--state', SWSTATE];
+const sw1 = JSON.parse((await run(swArgs)).out);
+check('sweep: first run reports every thread as firstSeen',
+  sw1.length === 3 && sw1.every((t) => t.firstSeen === true) && sw1.every((t) => t.mine === true));
+check('sweep: writes a state file', fs.existsSync(SWSTATE));
+const sw2 = JSON.parse((await run(swArgs)).out);
+check('sweep: a second sweep with no changes is empty', sw2.length === 0);
+await run(['post', '--thread', SW1, '--as', 'lead', '--body', 'go w1']); // SW1 turn -> w1
+const sw3 = JSON.parse((await run(swArgs)).out);
+check('sweep: surfaces only the turn-flipped thread, mine=false',
+  sw3.length === 1 && sw3[0].id === SW1 && sw3[0].mine === false && sw3[0].firstSeen === false);
+await run(['note', '--thread', SW2, '--as', 'lead', '--body', 'fyi']); // SW2 note, turn stays lead
+const sw4 = JSON.parse((await run(swArgs)).out);
+check('sweep: a new note counts as a change (mine still true on SW2)',
+  sw4.length === 1 && sw4[0].id === SW2 && sw4[0].notes === 1 && sw4[0].mine === true);
+await run(['resolve', '--thread', SW3, '--as', 'lead', '--body', 'done']); // SW3 resolved, turn -> w3
+const sw5 = JSON.parse((await run(swArgs)).out);
+check('sweep: a resolution surfaces (status=resolved, mine=false)',
+  sw5.length === 1 && sw5[0].id === SW3 && sw5[0].status === 'resolved' && sw5[0].mine === false);
+const sw6 = JSON.parse((await run(swArgs)).out);
+check('sweep: quiet again after all changes consumed', sw6.length === 0);
+const swReset = JSON.parse((await run([...swArgs, '--reset'])).out);
+check('sweep --reset: re-baselines and reports the whole set as firstSeen',
+  swReset.length === 3 && swReset.every((t) => t.firstSeen === true));
+// missing thread in an explicit list is flagged, never crashes
+const swMissState = path.join(TMP, 'sw-miss.json');
+const swMiss = JSON.parse((await run(['sweep', '--thread', `${SW1},nope`, '--as', 'lead', '--state', swMissState])).out);
+const missEntry = swMiss.find((t) => t.id === 'nope');
+check('sweep: a missing thread is flagged {id,error}, the rest still sweep',
+  missEntry && /no such thread/.test(missEntry.error) && missEntry.changed === true && swMiss.some((t) => t.id === SW1));
+// a corrupt state file just re-baselines, no crash
+const swCorrupt = path.join(TMP, 'sw-corrupt.json');
+fs.writeFileSync(swCorrupt, '{ not json');
+const swFromCorrupt = await run(['sweep', '--thread', SW1, '--as', 'lead', '--state', swCorrupt]);
+check('sweep: a corrupt state file re-baselines instead of crashing',
+  swFromCorrupt.code === 0 && JSON.parse(swFromCorrupt.out).length === 1);
+// --all derives the set from participation
+const swAllState = path.join(TMP, 'sw-all.json');
+const swAll = JSON.parse((await run(['sweep', '--all', '--participant', 'w1', '--as', 'lead', '--state', swAllState])).out);
+check('sweep --all --participant: derives the set, only w1 threads',
+  swAll.some((t) => t.id === SW1) && !swAll.some((t) => t.id === SW2 || t.id === SW3));
+// default state path lives under the root, keyed by handle, and stays out of status --all
+await run(['sweep', '--thread', SW1, '--as', 'lead']);
+check('sweep: default state file is <root>/.athread-sweep.<as>.json',
+  fs.existsSync(path.join(TMP, '.athread-sweep.lead.json')));
+check('sweep: the state file is not picked up by status --all',
+  !JSON.parse((await run(['status', '--all'])).out).some((t) => t.id && t.id.startsWith('.athread-sweep')));
+// argument guards
+const swBoth = await run(['sweep', '--thread', SW1, '--all', '--as', 'lead']);
+check('sweep: rejects --thread together with --all', swBoth.code === 1 && /either --thread/.test(swBoth.err));
+const swNeither = await run(['sweep', '--as', 'lead']);
+check('sweep: requires --thread or --all', swNeither.code === 1 && /--thread .* or --all/.test(swNeither.err));
+const swBadFlag = await run(['sweep', '--thread', SW1, '--bogus', 'x']);
+check('sweep: rejects an unknown option', swBadFlag.code === 1 && /unknown option "--bogus"/.test(swBadFlag.err));
+const swHelp = await run(['help', 'sweep']);
+check('help: help sweep documents the safety-net sweep',
+  swHelp.code === 0 && /only the threads that moved/i.test(swHelp.out) && /--reset/.test(swHelp.out));
+check('help: global help lists the sweep command', /\n  sweep\s+Print only the threads that changed/.test(globalHelp.out));
 
 fs.rmSync(TMP, { recursive: true, force: true });
 if (failures) { console.error(`\n${failures} check(s) failed`); process.exit(1); }

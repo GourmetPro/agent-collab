@@ -14,17 +14,27 @@ with your effort's real values.
 ## Resume after compaction - do this first
 0. Env: `AT=<abs-path-to-athread.mjs>` `ROOT=<thread-root>`
    `MY_HANDLE=<coordinator-handle>`. Constraint: <e.g. local DB only>.
-1. Re-arm waits. Use a real background task (`run_in_background:true` in Claude
-   Code), not shell `&` or `disown`, so output stays attached to the harness. If
-   a wait already fired during the gap, read its output first; a handback may be
-   waiting.
+1. SWEEP FIRST (source of truth). Before anything else, diff every owned thread
+   against the last sweep - this catches any resolution/flip a watcher dropped
+   while you were compacting:
+   `node "$AT" sweep --root "$ROOT" --all --participant "$MY_HANDLE" --as "$MY_HANDLE"`
+   (or `sweep --thread <your set> --as "$MY_HANDLE"`). Act on whatever it surfaces.
+2. Re-arm waits (best-effort accelerator only - the sweep above is the net). Use a
+   real background task (`run_in_background:true` in Claude Code), not shell `&` or
+   `disown`, so output stays attached to the harness. If a wait already fired
+   during the gap, read its output first; a handback may be waiting. Prefer short,
+   break-on-event waits you re-arm each round over one long persistent loop.
    - A: `node "$AT" wait --root "$ROOT" --thread effort-stream-a --as "$MY_HANDLE" --follow --interval 3`
      (bg `<task id>`, turn=<session handle>).
    - B: PARKED - do not re-arm; I initiate next post.
    - Peer coordinator: `node "$AT" wait --thread peer-coordinator-thread --as "$MY_HANDLE" --follow --interval 3`
      (omit if there is no peer coordinator).
-2. Check state with `status`/`read` for each thread.
 3. Resume from the per-stream State cells and Running log.
+
+Then, on EVERY later wake (event, human message, or re-entry): sweep again before
+acting. Silence means "sweep", never "nothing changed". When killing an orphaned
+watcher, match its exact thread ids + `--root` so you do not kill another effort's
+waits on this machine.
 
 > **STATUS <date>:** <one-line current state: which streams are merged, which
 > are in review, which are blocked>.

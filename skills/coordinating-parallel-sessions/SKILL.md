@@ -189,13 +189,33 @@ additions:
 - **Resolve a thread only when its work is MERGED and signed off**, not at code
   signoff.
 - **Stay silent while waits are pending, but do not trust silence as progress.**
-  Do not narrate polling. One armed wait per thread at a time, or one poller over
-  all active threads if your harness reaps long-lived waits.
-- Track every armed wait or poller's exact command and task id in the handoff so
-  a restart or compaction can re-arm them.
-- Sweep `pending --thread <id> --as <coordinator>` for every active thread on
-  each wake, timeout, or poller heartbeat. Notes do not flip the turn, so `wait`
-  will miss checkpoint-only signals until you sweep.
+  Do not narrate polling. One armed wait per thread at a time.
+- **Sweep at every turn boundary - that is your source of truth, not any
+  background watcher.** First action on ANY wake (a delivered event, a human
+  message, or any re-entry): run `athread sweep --all --participant <coordinator>
+  --as <coordinator>` (or `sweep --thread <your set>`) over the threads you own.
+  It diffs against the last sweep and surfaces only what moved - a turn flip, new
+  notes, or a resolution you would otherwise miss. A sweep has no live-process
+  dependency, so it catches anything a dead watcher dropped. Treat silence as a
+  trigger to sweep, never as evidence nothing changed.
+- **A long-lived background watcher silently stops delivering.** A persistent
+  backgrounded `wait` or `Monitor` can have its harness event routing severed at
+  idle/compaction boundaries: the process stays alive (visible in `ps`) but its
+  output never reaches you, with no error. Diagnostic tell: the process exists but
+  its task has no output file = orphaned. So prefer SHORT, break-on-first-event
+  watchers that you re-arm each round (each one is short enough to survive to its
+  fire) over one long persistent loop, and never let a thread's fate depend on a
+  watcher instead of the turn-start sweep.
+- **Kill orphaned watchers precisely.** A shared machine runs many unrelated
+  `athread` waits from other efforts and worktrees. Match the exact command
+  (thread ids + `--root`) before you `kill`; never blanket-kill `athread` procs.
+- Track every armed wait's exact command and task id in the handoff so a restart
+  or compaction can re-arm them - but the handoff's thread set + the sweep, not
+  the watcher, is what guarantees nothing is stranded.
+- `sweep` already covers note checkpoints (a new note is a change it surfaces).
+  If you are not sweeping a given thread, `pending --thread <id> --as
+  <coordinator>` is the narrow per-thread note peek; `wait` alone never returns on
+  a note.
 - **Use `note` only for out-of-band signals, when available.** Notes do not flip
   the turn and do not replace the handback post. Use them for advisory
   fire-and-forget signals such as "main moved; rebase before your next push" or a
@@ -367,7 +387,9 @@ will crush the machine. Enforce:
 | Signing off on a described screenshot | Read the PNG yourself before signoff. |
 | Posting to the handoff's thread id without confirming a live listener | Require the join handshake before assigning work; a stale id can accept posts silently. |
 | Treating silence as proof of work | Probe the worker worktree and thread metadata; silence is ambiguous. |
-| Missing checkpoint notes | Sweep `pending` on every wake or poller heartbeat; notes do not wake `wait`. |
+| Trusting a background watcher to wake you | Watchers die silently at idle/compaction boundaries; sweep (`status --all`/`athread sweep`) at every turn boundary as the source of truth. |
+| Missing a resolution or checkpoint note | `athread sweep` over your owned set on every wake surfaces turn flips, resolutions, and new notes; `wait` alone returns on neither a note nor a missed flip. |
+| Blanket-killing orphaned `athread` watchers | Match the exact thread ids + `--root` before `kill`; a shared machine runs other efforts' waits. |
 | Sending a no-op "stand by" post | Park by holding `turn=claude`; re-engage only with a real task. |
 | Arming a wait on a thread already at `turn=claude` | Respond first; arm only after you post. |
 | Re-arming a parked thread | Record `PARKED - do not re-arm; I initiate next post`; post only when you are ready to re-engage. |

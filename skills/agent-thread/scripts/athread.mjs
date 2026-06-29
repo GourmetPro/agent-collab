@@ -2,7 +2,7 @@
 // athread - a zero-dependency, file-based thread for two agent sessions to take
 // turns. Part of the `agent-thread` skill. Runs on any Node >= 18, no installs.
 //
-// Subcommands: init | post | resolve | wait | read | status | kickoff | help
+// Subcommands: init | post | note | pending | resolve | wait | read | status | sweep | kickoff | help
 //
 // A thread is a directory under the resolved thread root:
 //   meta.json        { participants, turn, status, round_cap, ... }
@@ -49,6 +49,7 @@ const commandOptions = {
   wait: new Set([...commonOptions, 'as', 'timeout', 'interval', 'follow', 'probe']),
   read: new Set(commonOptions),
   status: new Set([...commonOptions, 'all', 'open', 'participant', 'since', 'min-messages', 'max-messages']),
+  sweep: new Set([...commonOptions, 'as', 'all', 'open', 'participant', 'since', 'min-messages', 'max-messages', 'state', 'reset']),
   kickoff: new Set([...commonOptions, 'as', 'role']),
 };
 
@@ -219,7 +220,7 @@ Output:
   While pending, wait prints no stdout. Treat silence as expected.
 
 Exit codes:
-  0   Your turn (window printed) or the thread is resolved.
+  0   Your turn (window printed when there are messages) or the thread is resolved.
   2   Timed out waiting (blocking mode only; --follow never times out).
   3   --probe only: not yet your turn (peer still holds it). No output; not an
       error - a self-polling worker can keep working and probe again later.
@@ -271,6 +272,38 @@ Examples:
   ${exe} status --all --participant intake --open
   ${exe} status --all --open --since 2026-06-25 --min-messages 20`,
 
+    sweep: `${exe} sweep - turn-start safety net: print only the threads that moved.
+
+Usage:
+  ${exe} sweep [--root R] --thread A,B,C [--as HANDLE] [--state F] [--reset]
+  ${exe} sweep [--root R] --all [--participant H] [--open] [...] [--as HANDLE]
+
+Options:
+  --root <path>          Thread root. Defaults to $ATHREAD_DIR or ~/.agent-threads.
+  --thread <a,b,c>       Explicit set of threads to sweep (comma list).
+  --all [filters]        Derive the set from the root; same filters as status --all
+                         (--participant/--open/--since/--min-messages/--max-messages).
+                         Scope it (e.g. --participant YOU) so you do not sweep other
+                         efforts' threads on a shared machine.
+  --as <handle>          Your handle. Keys the state file and adds "mine": turn==you.
+  --state <path>         State file. Default: <root>/.athread-sweep[.<as>].json.
+  --reset                Ignore the saved baseline: report every thread, re-baseline.
+  --help                 Show this help.
+
+Notes:
+  Snapshots turn/status/message/note counts per thread, diffs against the last
+  sweep (a small JSON state file), prints ONLY changed threads as a JSON array
+  (each with "firstSeen", plus "mine" when --as is given), then saves the new
+  baseline. Resolved threads count as changes you may have missed. Unlike a
+  background watcher, a sweep has no live-process dependency - run it first on
+  every wake to catch anything a dead watcher missed. A missing/corrupt state
+  file just re-baselines; a missing/garbled thread is flagged {id,error}, never
+  crashes. Read-only on the threads (no turn, no post).
+
+Examples:
+  ${exe} sweep --thread review-1,review-2,review-3 --as lead
+  ${exe} sweep --all --participant lead --open --as lead`,
+
     kickoff: `${exe} kickoff - emit a one-paste launcher for the other session.
 
 Usage:
@@ -314,6 +347,7 @@ Commands:
   wait       Block until your turn or resolution.
   read       Print the transcript.
   status     Print thread metadata as JSON (--all for a fleet view).
+  sweep      Print only the threads that changed since your last sweep.
   kickoff    Emit a one-paste launcher for the peer session.
   help       Show global or command-specific help.
 
@@ -430,6 +464,54 @@ function threadSummary(i) {
 const otherOf = (m, who) => m.participants.find((p) => p !== who) || '(peer)';
 const nowIso = () => new Date().toISOString();
 
+// One thread's summary, or a non-crashing {id,error} for a missing/garbled thread.
+function summarizeOrError(tid) {
+  if (!fs.existsSync(metaPath(tid))) return { id: tid, error: 'no such thread' };
+  try { return threadSummary(tid); }
+  catch (e) { return { id: tid, error: String(e.message || e) }; }
+}
+
+// Read-only fleet view over every thread under the root, honoring the same
+// AND-composed filters as `status --all`. Shared by `status --all` and `sweep`.
+function fleetView(args) {
+  const wantOpen = !!args.open;
+  const wantPart = (args.participant !== undefined && args.participant !== true) ? args.participant : null;
+  const minMsgs = args['min-messages'] !== undefined ? nonNegInt(args['min-messages'], 'min-messages') : null;
+  const maxMsgs = args['max-messages'] !== undefined ? nonNegInt(args['max-messages'], 'max-messages') : null;
+  let sinceMs = null;
+  if (args.since !== undefined) {
+    if (args.since === true) throw new Error('athread: --since requires an ISO timestamp');
+    const d = new Date(args.since);
+    if (Number.isNaN(d.getTime())) throw new Error(`athread: --since must be an ISO date (got "${args.since}")`);
+    sinceMs = d.getTime();
+  }
+  const filtering = wantOpen || wantPart != null || minMsgs != null || maxMsgs != null || sinceMs != null;
+  const names = fs.existsSync(root)
+    ? fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort()
+    : [];
+  const out = [];
+  for (const tid of names) {
+    if (!fs.existsSync(metaPath(tid))) continue; // not a thread dir
+    let s;
+    // A garbled thread can't be matched against a predicate, so drop it when
+    // filtering; surface it as {id,error} only in the unfiltered listing.
+    try { s = threadSummary(tid); }
+    catch (e) { if (!filtering) out.push({ id: tid, error: String(e.message || e) }); continue; }
+    if (wantOpen && s.status !== 'open') continue;
+    if (wantPart != null && !s.participants.includes(wantPart)) continue;
+    if (minMsgs != null && s.messages < minMsgs) continue;
+    if (maxMsgs != null && s.messages > maxMsgs) continue;
+    if (sinceMs != null && !(s.updated && new Date(s.updated).getTime() >= sinceMs)) continue;
+    out.push(s);
+  }
+  return out;
+}
+
+// A thread's change-signal for `sweep`: any turn/status/message/note movement
+// changes the string. Errors carry their text so a CHANGING error re-surfaces
+// while a steady one quiets after the first sweep.
+const signalOf = (s) => (s.error ? `ERROR:${s.error}` : `${s.turn}|${s.status}|${s.messages}|${s.notes}`);
+
 const nextIndex = (i) => {
   const max = msgFiles(i).reduce((m, f) => Math.max(m, parseInt(f.slice(0, 4), 10)), 0);
   return String(max + 1).padStart(4, '0');
@@ -506,10 +588,10 @@ function printWindow(i, who) {
 }
 
 // Single-shot check used by both the blocking wait loop and the non-blocking
-// --probe: if the thread is resolved or it is `who`'s turn (with something to
-// read), print the window + status line and return true. Otherwise return false
-// without printing, so the caller decides whether to keep waiting (loop) or exit
-// with the "not yet your turn" sentinel (probe).
+// --probe: if the thread is resolved or it is `who`'s turn, print any available
+// window + status line and return true. Otherwise return false without printing,
+// so the caller decides whether to keep waiting (loop) or exit with the "not yet
+// your turn" sentinel (probe).
 function emitTurnOrResolved(i, who) {
   const m = readMeta(i);
   if (m.status === 'resolved') {
@@ -517,7 +599,7 @@ function emitTurnOrResolved(i, who) {
     console.log('\n[athread] status=resolved');
     return true;
   }
-  if (m.turn === who && msgFiles(i).length) {
+  if (m.turn === who) {
     printWindow(i, who);
     const round = substantiveFilesOf(i).length;
     const capped = m.round_cap != null && round >= m.round_cap;
@@ -708,37 +790,7 @@ async function main() {
       // Read-only fleet view: enumerate every thread dir under the root. No lock
       // (a snapshot must not block live writers); a garbled thread is flagged,
       // never crashes the listing. Optional filters narrow it, AND-composed.
-      const wantOpen = !!a.open;
-      const wantPart = (a.participant !== undefined && a.participant !== true) ? a.participant : null;
-      const minMsgs = a['min-messages'] !== undefined ? nonNegInt(a['min-messages'], 'min-messages') : null;
-      const maxMsgs = a['max-messages'] !== undefined ? nonNegInt(a['max-messages'], 'max-messages') : null;
-      let sinceMs = null;
-      if (a.since !== undefined) {
-        if (a.since === true) throw new Error('athread: --since requires an ISO timestamp');
-        const d = new Date(a.since);
-        if (Number.isNaN(d.getTime())) throw new Error(`athread: --since must be an ISO date (got "${a.since}")`);
-        sinceMs = d.getTime();
-      }
-      const filtering = wantOpen || wantPart != null || minMsgs != null || maxMsgs != null || sinceMs != null;
-      const names = fs.existsSync(root)
-        ? fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort()
-        : [];
-      const out = [];
-      for (const tid of names) {
-        if (!fs.existsSync(metaPath(tid))) continue; // not a thread dir
-        let s;
-        // A garbled thread can't be matched against a predicate, so drop it when
-        // filtering; surface it as {id,error} only in the unfiltered listing.
-        try { s = threadSummary(tid); }
-        catch (e) { if (!filtering) out.push({ id: tid, error: String(e.message || e) }); continue; }
-        if (wantOpen && s.status !== 'open') continue;
-        if (wantPart != null && !s.participants.includes(wantPart)) continue;
-        if (minMsgs != null && s.messages < minMsgs) continue;
-        if (maxMsgs != null && s.messages > maxMsgs) continue;
-        if (sinceMs != null && !(s.updated && new Date(s.updated).getTime() >= sinceMs)) continue;
-        out.push(s);
-      }
-      console.log(JSON.stringify(out, null, 2));
+      console.log(JSON.stringify(fleetView(a), null, 2));
     } else {
       assertSafeId(id);
       const m = readMeta(id);
@@ -746,6 +798,59 @@ async function main() {
       const notes = all.filter(isNoteFile).length;
       console.log(JSON.stringify({ ...m, rounds: all.length - notes, messages: all.length, notes }, null, 2));
     }
+  } else if (cmd === 'sweep') {
+    // Turn-start safety net for a coordinator: snapshot a named set of threads,
+    // diff against the last sweep's signals (a tiny on-disk state file), and
+    // print ONLY the threads that moved (turn flip, new notes, resolution). This
+    // is the authoritative wake source the findings call for - background
+    // watchers can silently stop delivering events, but a sweep has no
+    // live-process dependency and catches anything they missed.
+    const who = (a.as !== undefined && a.as !== true) ? assertSafeHandle(a.as) : null;
+    const hasThread = a.thread !== undefined && a.thread !== true;
+    const useAll = !!a.all;
+    if (hasThread && useAll) throw new Error('athread: sweep takes either --thread a,b,c or --all, not both');
+    if (!hasThread && !useAll) throw new Error('athread: sweep needs --thread a,b,c or --all');
+    let entries;
+    if (useAll) {
+      entries = fleetView(a); // honors --participant/--open/--since/--min/max-messages
+    } else {
+      const ids = String(a.thread).split(',').map((s) => s.trim());
+      if (ids.some((t) => t === '')) throw new Error('athread: empty thread id in --thread list');
+      const seen = new Set();
+      for (const t of ids) {
+        if (seen.has(t)) throw new Error(`athread: duplicate thread id "${t}" in --thread list`);
+        seen.add(t);
+      }
+      ids.forEach(assertSafeId);
+      entries = ids.map(summarizeOrError);
+    }
+    // State file: default beside the root, keyed by handle so two coordinators
+    // sharing a root keep separate baselines. The leading dot + .json keeps it
+    // out of `status --all` (which only enumerates directories).
+    const statePath = (a.state !== undefined && a.state !== true)
+      ? path.resolve(a.state)
+      : path.join(root, `.athread-sweep${who ? `.${who}` : ''}.json`);
+    let prior = {};
+    if (!a.reset) {
+      try { prior = JSON.parse(fs.readFileSync(statePath, 'utf8')); }
+      catch { prior = {}; } // missing or corrupt baseline: re-baseline, never crash the safety net
+    }
+    const nextState = a.reset ? {} : { ...prior };
+    const changed = [];
+    for (const e of entries) {
+      const sig = signalOf(e);
+      const was = prior[e.id];
+      nextState[e.id] = sig;
+      if (was !== sig) {
+        const firstSeen = was === undefined;
+        changed.push(e.error
+          ? { ...e, firstSeen, changed: true }
+          : (who ? { ...e, mine: e.turn === who, firstSeen } : { ...e, firstSeen }));
+      }
+    }
+    try { fs.writeFileSync(statePath, JSON.stringify(nextState, null, 2) + '\n'); }
+    catch (err) { process.stderr.write(`[athread] sweep: could not persist state to ${statePath}: ${String(err.message || err)}\n`); }
+    console.log(JSON.stringify(changed, null, 2));
   } else if (cmd === 'kickoff') {
     assertSafeId(id);
     const m = readMeta(id);
