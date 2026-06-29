@@ -619,6 +619,15 @@ function kickoffPrompt({ handle, peer, threadId, role, session }) {
   const roleLine = role ? `Your collaboration role: ${role}.\n` : '';
   const T = unquotedSlug(threadId);
   const H = unquotedSlug(handle);
+  // The skill-first opening line must be self-sufficient: a user who knows the
+  // peer already has the skill copies only that sentence, so a custom root has to
+  // ride along (otherwise the peer defaults to ~/.agent-threads and never finds
+  // the thread). For the default root there is nothing to carry.
+  const rootTok = SAFE_PATH.test(root) ? root : shq(root);
+  const rootHint = usesDefaultRoot ? '' : ` (thread root: ${rootTok})`;
+  const rootLine = usesDefaultRoot
+    ? ''
+    : `\nThread root is ${rootTok} - pass it as --root on every athread command.`;
   const bodyFile = 'PATH_YOU_WROTE';
   const skillPath = path.resolve(path.dirname(SELF), '..', 'SKILL.md');
   const skillLine = 'Use the agent-thread skill if it is available in your environment; it contains the full protocol (collaboration patterns, escalation rules).'
@@ -654,9 +663,9 @@ Re-run your wait at the start of your turn and again right before you post or re
   const footer = session
     ? 'Your specific task is in the first message you receive. Keep each turn concrete and brief. `wait --follow` keeps waiting across idle gaps; if your terminal is reaped, just re-run the same wait command. Stop only when the peer resolves the thread.'
     : 'Your specific task and goal are in the first message you receive. Keep each turn concrete and brief. If you hit the round cap or a wait times out, stop and tell the human.';
-  return `Use the agent-thread skill. Join thread ${threadId} as ${handle}.
+  return `Use the agent-thread skill. Join thread ${threadId} as ${handle}${rootHint}.
 
-You are joining a shared agent-thread. Your thread handle is "${handle}" (use this exact value for --as); the peer's handle is "${peer}".
+You are joining a shared agent-thread. Your thread handle is "${handle}" (use this exact value for --as); the peer's handle is "${peer}".${rootLine}
 ${roleLine}Communicate ONLY through the thread. ${loopVerb}
 ${framing}
 ${skillLine}

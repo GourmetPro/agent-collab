@@ -283,6 +283,9 @@ check('kickoff default root: does not bake in the initiator temp dir',
   !defaultKo.out.includes(os.tmpdir()) && /PATH_YOU_WROTE/.test(defaultKo.out));
 check('kickoff default root: includes a concrete turn contract',
   /Turn contract:/.test(defaultKo.out) && /Do not answer only with/.test(defaultKo.out));
+check('kickoff default root: first sentence carries no root hint (default is implied)',
+  /^Use the agent-thread skill\. Join thread d as b\.$/.test(defaultKo.out.split('\n')[0])
+    && !/thread root/i.test(defaultKo.out));
 
 const CUSTOM = fs.mkdtempSync(path.join(os.tmpdir(), 'athread custom '));
 await runWithEnv({ ATHREAD_DIR: TMP }, ['init', '--root', CUSTOM, '--thread', 'custom', '--participants', 'a,b']);
@@ -296,6 +299,10 @@ check('kickoff custom root: fallback includes post and resolve with --root after
     && customKo.out.includes(`resolve --root '${CUSTOM}' --thread custom --as b --body `));
 check('kickoff custom root: does not bake in an initiator body-file path',
   !/athread-custom-b\.md/.test(customKo.out) && /PATH_YOU_WROTE/.test(customKo.out));
+check('kickoff custom root: the skill-first sentence carries the custom root (copy-one-line safe)',
+  customKo.out.split('\n')[0] === `Use the agent-thread skill. Join thread custom as b (thread root: '${CUSTOM}').`);
+check('kickoff custom root: joining paragraph says to pass the root as --root',
+  customKo.out.includes(`Thread root is '${CUSTOM}' - pass it as --root on every athread command.`));
 const direct = await runDirect(CUSTOM, ['status', '--thread', 'custom']);
 check('executable: athread.mjs runs directly through its shebang',
   direct.code === 0 && /"id": "custom"/.test(direct.out));
