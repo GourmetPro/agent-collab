@@ -13,7 +13,7 @@ description: >
   about X", "let codex and claude work this out", "I asked an agent to do X,
   they'll come back to you via Y", or wanting two open sessions to talk without
   you relaying.
-user-invocable: false
+user-invocable: true
 ---
 
 # agent-thread

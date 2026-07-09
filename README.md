@@ -3,9 +3,10 @@
 Agent skills for coordinating work *between* agent sessions - distributed via
 the [Agent Skills open standard](https://github.com/anthropics/skills).
 
-## Background Skills
+## Skills
 
-Auto-applied when relevant to the current task.
+Auto-applied when relevant to the current task, and directly callable where
+noted.
 
 ### `agent-thread`
 
@@ -17,6 +18,7 @@ with different tools/model/repo), delegate a sub-task, pair (driver/navigator),
 and brainstorm. Triggers whenever you want a second agent to weigh in until you
 converge, or want two open sessions to talk without you relaying. Either side can
 also drop an out-of-band note at any time without taking the turn.
+Invoke explicitly as `$agent-thread` in Codex or `/agent-thread` in Claude.
 
 - [SKILL.md](./skills/agent-thread/SKILL.md)
 - [Design notes](./skills/agent-thread/DESIGN.md)
