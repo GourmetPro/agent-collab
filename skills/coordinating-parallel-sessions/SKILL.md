@@ -50,21 +50,21 @@ parallel-stream overlay to `HANDOFF.md`.
 4. **Gate each stream through the pipeline.** Plan -> implement -> review -> UX ->
    PR -> merge, with a real coordinator gate at each stage. See
    [The pipeline](#the-pipeline-gate-every-stream).
-5. **Sequence the merges.** Identify shared-file collisions up front; merge one,
-   rebase the rest onto updated main, re-run CI, merge next. See
-   [Merge sequencing](#merge-sequencing).
-6. **Coordinate peer fleets when needed.** If another coordinator is also
-   landing streams into the same main branch, open a peer-coordinator channel and
-   agree on disjointness, named contracts, and landing signals before merging.
-7. **Recover quiet streams.** Use thread state plus worktree git state to tell
-   working from deaf/stalled; salvage committed work and revive sessions when
-   needed. See [When the squad goes quiet](#when-the-squad-goes-quiet). When the
-   user launches the sessions then leaves, also run the
+5. **Sequence all landing work.** Identify shared-file collisions up front;
+   merge one, rebase the rest onto updated main, re-run CI, and merge next. If
+   another coordinator shares main, open a peer-coordinator channel and agree
+   on disjointness, named contracts, and landing signals before merging. See
+   [Merge sequencing](#merge-sequencing) and
+   [Multiple coordinators](#multiple-coordinators-shared-main).
+6. **Recover, resolve, and tear down.** Use thread state plus worktree Git state
+   to tell working from deaf or stalled; salvage committed work and revive
+   sessions when needed. See
+   [When the squad goes quiet](#when-the-squad-goes-quiet). When the user
+   launches the sessions then leaves, also run the
    [Unattended runs](#unattended-runs) rules: workers never escalate (they route
    privileged commands to you), and each long-lived worker keeps its own
-   canonical handoff pair.
-8. **Resolve and tear down.** Resolve a thread only when its work is MERGED and
-   signed off. Proactively kill idle dev servers and browsers. See
+   canonical handoff pair. Resolve a thread only when its work is MERGED and
+   signed off; proactively kill idle dev servers and browsers. See
    [Resource coordination](#resource-coordination).
 
 ## What you produce
