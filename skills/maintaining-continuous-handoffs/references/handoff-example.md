@@ -9,8 +9,8 @@ the sample state; do not retain facts that were not verified.
 
 - **Objective:** Keep the legacy `/catalog` route public while completing the
   catalog refactor.
-- **Status:** In progress. The user correction has been propagated; the current
-  build predates that correction.
+- **Status:** In progress. The user correction is recorded but has not yet been
+  sent to `reviewer-ui`; the current build predates that correction.
 - **Git:** Worktree `Not yet verified`; branch `feature/catalog`; commit
   `a13f09c`; cleanliness `Not yet verified`.
 - **Binding decision:** `/catalog` remains public. This supersedes the earlier
@@ -60,4 +60,5 @@ Entries are append-only and remain oldest to newest.
 - User ruled that legacy `/catalog` must remain public.
 - Marked focused tests and active build non-final because they use the previous
   removal decision.
-- Review remains on the old decision until the correction is sent.
+- Observed that `reviewer-ui` had not received the correction when this entry
+  was recorded.
