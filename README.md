@@ -19,6 +19,8 @@ and brainstorm. Triggers whenever you want a second agent to weigh in until you
 converge, or want two open sessions to talk without you relaying. Either side can
 also drop an out-of-band note at any time without taking the turn.
 Invoke explicitly as `$agent-thread` in Codex or `/agent-thread` in Claude.
+For a persistent session that may span compaction, a pause, or ownership
+transfer, compose it with `maintaining-continuous-handoffs`.
 
 - [SKILL.md](./skills/agent-thread/SKILL.md)
 - [Design notes](./skills/agent-thread/DESIGN.md)
