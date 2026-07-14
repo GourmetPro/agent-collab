@@ -24,6 +24,19 @@ Invoke explicitly as `$agent-thread` in Codex or `/agent-thread` in Claude.
 - [Design notes](./skills/agent-thread/DESIGN.md)
 - CLI: [`scripts/athread.mjs`](./skills/agent-thread/scripts/athread.mjs) (zero deps, Node >= 18)
 
+### `maintaining-continuous-handoffs`
+
+Keep one repository-local handoff current while work spans compaction, pauses,
+active operations, or ownership transfers. It separates a short mutable resume
+point from the append-only audit trail, reconciles recorded claims against real
+state, and keeps exactly one next action visible. Small same-turn tasks skip the
+handoff entirely.
+Invoke explicitly as `$maintaining-continuous-handoffs` in Codex or
+`/maintaining-continuous-handoffs` in Claude.
+
+- [SKILL.md](./skills/maintaining-continuous-handoffs/SKILL.md)
+- [Concrete handoff example](./skills/maintaining-continuous-handoffs/references/handoff-example.md)
+
 ### `coordinating-parallel-sessions`
 
 Coordinate N parallel agent sessions (Claude Code or Codex) from a single
