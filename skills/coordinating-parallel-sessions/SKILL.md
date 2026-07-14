@@ -1,19 +1,13 @@
 ---
 name: coordinating-parallel-sessions
 description: >
-  Use when one coordinator session must drive several other agent sessions
-  (Claude Code or Codex) running in parallel, each owning an independent
-  PR-sized workstream in its own git worktree, gating every step - plan,
-  implement, review, UX-verify, PR, merge - instead of writing the code itself.
-  For a task that decomposes into roughly 3-6 independent workstreams, each big
-  enough to fill its own context window, where parallelism plus independent
-  review beats doing it inline, or where long-running/flaky streams need active
-  liveness and recovery management. Triggers on asks like "I'll launch the
-  sessions, you coordinate them", "run several agents in parallel on separate
-  branches and gate each", "coordinate the sessions fixing X", "keep a living
-  handoff across these sessions", "fan this big effort across multiple sessions
-  and merge them safely". Not for one or two small changes (do those inline);
-  not for two peers talking it out (use agent-thread).
+  Use when one coordinator must direct roughly three to six independent,
+  PR-sized workstreams owned by separate agent sessions and git worktrees,
+  especially when streams need cross-session gates, liveness recovery,
+  dependency ordering, or conflict-safe merges. Triggers on asks like "I'll
+  launch the sessions, you coordinate them", "run several agents in parallel on
+  separate branches", "coordinate the sessions fixing X", "fan this effort
+  across worktrees", or "merge these agent streams safely".
 user-invocable: true
 ---
 
@@ -23,12 +17,17 @@ Coordinate N parallel agent sessions - one per workstream - from a single
 coordinator session: scope the streams, gate every step, sequence the merges.
 The coordinator NEVER writes the implementation. It sets up worktrees, threads,
 and specs; reviews and gates plan -> implement -> review -> UX -> PR -> merge;
-keeps a living handoff; and merges in a safe order. Each stream runs in its own
-git worktree and talks to the coordinator over its own agent-thread channel.
+keeps the canonical handoff current; and merges in a safe order. Each stream
+runs in its own git worktree and talks to the coordinator over its own
+agent-thread channel.
 
 **REQUIRED SUB-SKILL:** Use agent-thread for the per-session channel - one
 `--session` thread per stream. This skill is the multi-session layer on top of
 it; it assumes you already know the agent-thread wait/post loop.
+
+**REQUIRED SUB-SKILL:** Use maintaining-continuous-handoffs for the coordinator's
+canonical handoff and for any worker whose task may span compaction, a pause, or
+ownership transfer. This skill adds only the parallel-stream overlay.
 
 ## Your job (in order)
 
@@ -42,9 +41,10 @@ it; it assumes you already know the agent-thread wait/post loop.
    a spec (a file per stream, or in-thread for a complex one). The USER launches
    each session in its worktree and pastes the kickoff - you never spawn them.
    See [Setup](#setup-per-stream).
-3. **Open the living handoff.** Copy `references/handoff-template.md` to one file
-   and keep it live on EVERY state change. This is the highest-value habit of the
-   whole skill. See [The living handoff](#the-living-handoff-the-key-pattern).
+3. **Open the canonical handoff.** Use maintaining-continuous-handoffs, then add
+   the stream, thread/wait, dependency, merge/collision, gate, peer-coordinator,
+   and resource fields from `references/parallel-handoff-example.md`. See
+   [The parallel handoff overlay](#the-parallel-handoff-overlay).
 4. **Gate each stream through the pipeline.** Plan -> implement -> review -> UX ->
    PR -> merge, with a real coordinator gate at each stage. See
    [The pipeline](#the-pipeline-gate-every-stream).
@@ -59,7 +59,8 @@ it; it assumes you already know the agent-thread wait/post loop.
    needed. See [When the squad goes quiet](#when-the-squad-goes-quiet). When the
    user launches the sessions then leaves, also run the
    [Unattended runs](#unattended-runs) rules: workers never escalate (they route
-   privileged commands to you), and each keeps its own compaction-safe handoff.
+   privileged commands to you), and each long-lived worker keeps its own
+   canonical handoff.
 8. **Resolve and tear down.** Resolve a thread only when its work is MERGED and
    signed off. Proactively kill idle dev servers and browsers. See
    [Resource coordination](#resource-coordination).
@@ -67,8 +68,8 @@ it; it assumes you already know the agent-thread wait/post loop.
 ## What you produce
 
 A set of independently reviewed, CI-green PRs merged into one base branch in a
-conflict-safe order, plus a living handoff doc that captures the full history so
-the effort survives compaction or a coordinator restart.
+conflict-safe order, plus one canonical handoff whose parallel overlay makes
+every stream, wait, dependency, and merge decision resumable.
 
 ## Router
 
@@ -77,7 +78,7 @@ Open only the section you need.
 | You are about to... | Read |
 |---|---|
 | Stand up the worktrees/threads/specs | [Setup](#setup-per-stream) |
-| Start or maintain the handoff doc | [The living handoff](#the-living-handoff-the-key-pattern) + `references/handoff-template.md` |
+| Add coordination state to the canonical handoff | [The parallel handoff overlay](#the-parallel-handoff-overlay) + `references/parallel-handoff-example.md` |
 | Run a stream through its gates | [The pipeline](#the-pipeline-gate-every-stream) |
 | Drive the agent-thread waits as a coordinator | [agent-thread discipline](#agent-thread-discipline-for-a-coordinator) |
 | Diagnose a quiet or stalled worker | [When the squad goes quiet](#when-the-squad-goes-quiet) |
@@ -109,12 +110,12 @@ one:
   `wait --probe` between work chunks returns exit 0 (drain and act) or exit 3
   (still the peer's turn; keep working), without the false-stall risk of a tiny
   `--timeout`.
-- **Own-handoff discipline.** Each worker keeps its OWN compaction-safe
-  `tmp/HANDOFF.md` in its worktree, updated as it goes and re-read after each of
-  its own compactions - the same habit the coordinator uses, mirrored per worker.
+- **Own-handoff discipline.** Each worker expected to span compaction, a pause,
+  or ownership transfer uses maintaining-continuous-handoffs in its worktree.
+  Short worker tasks that finish in one context do not create one.
 - **For unattended runs, the no-escalation rule** (see
-  [Unattended runs](#unattended-runs)) goes in the kickoff and as the FIRST line
-  of the worker's `tmp/HANDOFF.md`, so it survives the worker's own compaction.
+  [Unattended runs](#unattended-runs)) goes in the kickoff and as the first
+  binding decision in the worker's handoff, so it survives compaction.
 
 ## The pipeline (gate every stream)
 
@@ -126,7 +127,7 @@ holds the gate and does not advance the stream until satisfied.
 | 1. Plan | Posts a short plan BEFORE any code | Approve with tightenings. Independent sparring is real value - a fresh session catches blind spots your own recon missed. |
 | 2. Implement | Writes the failing test first, then the code | None yet - let it work. |
 | 3. Code review | Posts the actual DIFF (not a prose summary) | Review the DIFF, not the report. Verify claims tests cannot catch (a wire-format regex a mocked test skips over but that 400s in prod). For the riskiest stream, run the canonical CI gates yourself. |
-| 4. UX pass | Exercises the change in the running app, screenshots each meaningful state to `<worktree>/tmp/ux/<stream>/` | Read the screenshots yourself and give a visual verdict. When a state sits behind generation, have the session seed the artifact directly to reach it. |
+| 4. UX pass | Exercises the change in the running app, screenshots each meaningful state to `/worktrees/ui/tmp/ux/ui/` | Read the screenshots yourself and give a visual verdict. When a state sits behind generation, have the session seed the artifact directly to reach it. |
 | 5. PR | Opens its own PR once you are satisfied | Confirm scope; note it in the handoff. |
 | 6. Merge | - | CI is the gate. Merge when green, in the [sequenced order](#merge-sequencing). |
 
@@ -141,20 +142,25 @@ Rules that make the gates real:
 - **Read the UX screenshots yourself.** A signoff on a described screenshot is not
   a signoff.
 
-## The living handoff (the key pattern)
+## The parallel handoff overlay
 
-A single compaction-safe file, updated on EVERY state change (handback, approval,
-change-request, merge, decision, blocker). It holds: the resume-after-compaction
-runbook; role and workflow rules; the stream status box (agent/thread/branch,
-state, git evidence, wait id); exact wait/poller re-arm commands and parked
-threads; approved contracts and open decisions; merge order and the shared-file
-conflict set; the canonical CI gate; liveness/revive notes; a resource policy;
-and a dated running log (newest last). Goal: the file alone is enough to resume
-coordinating with full history, so compaction is cheap.
+Use maintaining-continuous-handoffs for creation, transition updates,
+reconciliation, evidence state, ownership transfer, and closure. Add only the
+coordination fields that another coordinator needs:
 
-Start it from `references/handoff-template.md`. The discipline is not the format -
-it is updating it on every state change. A stale handoff is worse than none,
-because it lies.
+- one stream row per worker: owner, worktree, branch/commit, dirty state, thread
+  turn, phase, handback state, and one stream-specific next action;
+- exact thread root, ids, handles, captured wait/probe identifiers, re-arm
+  commands, and parked state;
+- cross-stream dependencies and named contract owners;
+- shared-file collision set, landing order, and rebase requirements;
+- canonical gates and which exact stream state each result validates;
+- peer-coordinator channel and landing signals when another fleet shares main;
+- resource limits for builds, servers, and browsers.
+
+Use `references/parallel-handoff-example.md` as the concrete overlay. Unknown
+values stay `Not yet verified`; never infer the `agent-thread` executable,
+worktree, handle, or process owner from a skill path or current directory.
 
 ## agent-thread discipline for a coordinator
 
@@ -167,8 +173,8 @@ additions:
   no session is listening because the worker reset and rejoined under a different
   id or handle. The handoff table catches typos; it does not prove liveness.
 - **Handshake every join or relaunch before assigning work.** The worker's first
-  post must echo `joined thread <id> as <handle>, cwd=<worktree>,
-  branch=<branch>, standing by`. Verify id, handle, cwd, and branch against the
+  post must echo `joined thread api-stream as worker-a, cwd=/worktrees/api,
+  branch=feat/api, standing by`. Verify id, handle, cwd, and branch against the
   handoff table, then assign the real task.
 - **Treat missing handback after a reset as a pairing problem first.** If you did
   not get a fresh handshake, make the first post a probe. No peer turn inside a
@@ -192,8 +198,8 @@ additions:
   Do not narrate polling. One armed wait per thread at a time.
 - **Sweep at every turn boundary - that is your source of truth, not any
   background watcher.** First action on ANY wake (a delivered event, a human
-  message, or any re-entry): run `athread sweep --all --participant <coordinator>
-  --as <coordinator>` (or `sweep --thread <your set>`) over the threads you own.
+  message, or any re-entry): run `athread sweep --all --participant lead
+  --as lead` (or `sweep --thread api-stream,ui-stream`) over the threads you own.
   It diffs against the last sweep and surfaces only what moved - a turn flip, new
   notes, or a resolution you would otherwise miss. A sweep has no live-process
   dependency, so it catches anything a dead watcher dropped. Treat silence as a
@@ -213,8 +219,8 @@ additions:
   or compaction can re-arm them - but the handoff's thread set + the sweep, not
   the watcher, is what guarantees nothing is stranded.
 - `sweep` already covers note checkpoints (a new note is a change it surfaces).
-  If you are not sweeping a given thread, `pending --thread <id> --as
-  <coordinator>` is the narrow per-thread note peek; `wait` alone never returns on
+  If you are not sweeping a given thread, `pending --thread api-stream --as
+  lead` is the narrow per-thread note peek; `wait` alone never returns on
   a note.
 - **Use `note` only for out-of-band signals, when available.** Notes do not flip
   the turn and do not replace the handback post. Use them for advisory
@@ -242,11 +248,13 @@ Thread state alone cannot distinguish "worker is busy" from "worker is deaf".
 Use the handoff status box plus out-of-band git probes before deciding.
 
 - **Probe liveness from the worktree.** For each stream, check
-  `git -C <worktree> branch --show-current`, `git -C <worktree> status --short`,
-  `git -C <worktree> log -1 --format=%ci`, and `athread status --thread <id>`.
+  `git -C /worktrees/api branch --show-current`,
+  `git -C /worktrees/api status --short`,
+  `git -C /worktrees/api log -1 --format=%ci`, and
+  `athread status --thread api-stream`.
   The handoff's `Evidence (git)` cell should summarize branch, dirty/clean, last
   commit age, and turn.
-- **Interpret silence conservatively.** `turn=<worker>` + old branch + clean tree
+- **Interpret silence conservatively.** `turn=worker-a` + old branch + clean tree
   + no commits past the normal cadence means a deaf or stalled worker, not
   patience. Dirty files or new commits mean progress exists, but the stream may
   still be stuck on a final handback or UX step.
@@ -279,19 +287,10 @@ fragile to reliable; put both in every worker kickoff.
   turn. **The coordinator runs it** (the coordinator's session is attended) and
   returns the output. Expect inbound "please run X" posts and be ready to be the
   fleet's hands for anything needing real permissions.
-- **Each worker keeps its own compaction-safe `tmp/HANDOFF.md`** in its worktree
-  (gitignored `tmp/` is per-worktree), updated as it goes and re-read after each
-  of its own compactions. The FIRST line must be the no-escalation rule, so a
-  freshly compacted worker does not re-learn to block on approval. A minimal top:
-
-  ```
-  # <thread> handoff (compaction-safe)
-  ## RULE #1 - NEVER ESCALATE: no human is watching. If a command needs approval
-  ## I can't grant, POST lead the exact command + cwd and ask lead to run it.
-  ## Task: <one line>   Branch / worktree: <branch> / <path>
-  ## State (newest last):  - <ts> did/ran X (result) / blocked on Y
-  ## Next: <one line>
-  ```
+- **Each long-lived worker uses maintaining-continuous-handoffs** in its
+  worktree. Record the no-escalation rule as the first binding decision, along
+  with the exact coordinator handle and handback channel. This keeps the rule in
+  the mutable resume section without inventing a second handoff format.
 
 - **Deliver these rules via the kickoff post, not a note.** A note does not wake
   a parked `wait` and a Codex worker will not sweep it, so a note is the wrong
@@ -299,7 +298,7 @@ fragile to reliable; put both in every worker kickoff.
   re-stated on task posts). See
   [one complete handback per round](#agent-thread-discipline-for-a-coordinator).
 - **Diagnosing an escalation-blocked worker vs a deaf one.** Both show
-  `turn=<worker>` + no new post. The tell is the worktree: an escalation-blocked
+  `turn=worker-a` + no new post. The tell is the worktree: an escalation-blocked
   worker often has a dirty tree / partial work and a shell waiting on a prompt; a
   wait-deaf worker is pristine on the old branch. Either way a human nudge
   unblocks the moment; the durable fix is the no-escalation rule above.
