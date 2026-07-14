@@ -7,11 +7,13 @@ Unknown values remain `Not yet verified`.
 
 ## PARALLEL STREAMS
 
-| Stream | Owner and scope | Git state | Thread state | Phase and next action |
-|---|---|---|---|---|
-| API | `worker-a`; API files | `feat/api`; dirty; no commit | `api-stream`; turn `worker-a` | Implementing. `worker-a` creates a checkpoint commit. |
-| UI | `worker-b`; UI files | `feat/ui` at `b220011`; cleanliness `Not yet verified` | `ui-stream`; turn `lead`; `PARKED` | Review signed off. `lead` decides landing order after A commits. |
-| Docs | `worker-c`; docs files | `feat/docs`; commit `Not yet verified` | `docs-stream`; turn `worker-c` | `BLOCKED` on the committed API contract. `worker-c` hands back the block. |
+Update this compact team roster and routing map on every stream state change.
+
+| Stream | Agent / handle | Worktree / Git | Thread / current turn | Current work and state | Reach / resume |
+|---|---|---|---|---|---|
+| API | API coordinator / `worker-a` | `/worktrees/api`; `feat/api`; dirty, no commit | `api-stream`; turn `worker-a` | Implementing the API contract; no handback | Inspect wait terminal `501`; then `worker-a` creates a checkpoint commit. |
+| UI | UI coordinator / `worker-b` | `/worktrees/ui`; `feat/ui` at `b220011`; cleanliness `Not yet verified` | `ui-stream`; turn `lead`; `PARKED` | Review signed off for `b220011`; current landing state not decided | Keep parked. `lead` decides landing order after the API commit. |
+| Docs | Docs coordinator / `worker-c` | `/worktrees/docs`; `feat/docs`; commit `Not yet verified` | `docs-stream`; turn `worker-c` | `BLOCKED` on the committed API contract | No wait armed. `worker-c` hands back the exact block. |
 
 ## THREADS AND WAITS
 

@@ -151,8 +151,10 @@ Use maintaining-continuous-handoffs for pair creation, transition updates,
 reconciliation, evidence state, ownership transfer, and closure. Add only the
 current coordination fields that another coordinator needs to `HANDOFF.md`:
 
-- one stream row per worker: owner, worktree, branch/commit, dirty state, thread
-  turn, phase, handback state, and one stream-specific next action;
+- one compact status row per worker, updated on every stream state change:
+  agent and handle, worktree, branch/commit and dirty state, thread turn, current
+  task and phase, handback state, exact reach or resume coordinate, resource
+  allocation, and one stream-specific next action;
 - exact thread root, ids, handles, captured wait/probe identifiers, re-arm
   commands, and parked state;
 - cross-stream dependencies and named contract owners;
@@ -160,6 +162,10 @@ current coordination fields that another coordinator needs to `HANDOFF.md`:
 - canonical gates and which exact stream state each result validates;
 - peer-coordinator channel and landing signals when another fleet shares main;
 - resource limits for builds, servers, and browsers.
+
+Treat the worker-status table as the compact team roster and routing map after
+compaction. Keep the row scannable; put detailed commands, evidence, contracts,
+and collision policy in the sections below it.
 
 Use `references/parallel-handoff-example.md` as the concrete overlay. Unknown
 values stay `Not yet verified`; never infer the `agent-thread` executable,

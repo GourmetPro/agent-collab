@@ -50,7 +50,7 @@ domain-specific overlays.
 |---|---|
 | `maintaining-continuous-handoffs` | Decide when a handoff is warranted; create, update, resume, reconcile, and close the handoff pair. |
 | `agent-thread` | For persistent sessions only, record the thread root, ID, handles, turn, wait command, and resolve condition in the handoff. The transcript remains the conversation evidence. |
-| `coordinating-parallel-sessions` | Record stream ownership, worktrees, branches, thread IDs, waits, collision sets, merge order, canonical gates, peer coordinators, and resource policy. |
+| `coordinating-parallel-sessions` | Maintain a compact current worker roster plus stream ownership, worktrees, branches, thread IDs, waits, collision sets, merge order, canonical gates, peer coordinators, and resource policy. |
 
 The new skill is user-invocable because a user may explicitly ask for a durable
 handoff. Its description must also support natural discovery from phrases about
@@ -179,7 +179,8 @@ stays below 100 lines so it does not need a contents list.
 - Add `maintaining-continuous-handoffs` as a required sub-skill.
 - Remove generic handoff creation, update, resume, and audit instructions that
   the new skill owns.
-- Retain the parallel-specific status and merge overlay.
+- Retain the parallel-specific status and merge overlay, including one compact
+  current-state and routing row per worker.
 - Rename `references/handoff-template.md` to
   `references/parallel-handoff-example.md` and rewrite it as a concrete overlay
   on the generic handoff contract.
