@@ -1,8 +1,9 @@
 # Parallel handoff overlay example
 
-Use `maintaining-continuous-handoffs` for the canonical file. Add these concrete
-sections for a parallel fleet, replacing sample values only with inspected
-facts. Unknown values remain `Not yet verified`.
+Use `maintaining-continuous-handoffs` for the canonical `HANDOFF.md`/`LOG.md`
+pair. Add these concrete current-state sections to `HANDOFF.md`, replacing
+sample values only with inspected facts. Keep all chronology in `LOG.md`.
+Unknown values remain `Not yet verified`.
 
 ## PARALLEL STREAMS
 

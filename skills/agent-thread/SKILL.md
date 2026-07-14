@@ -249,7 +249,7 @@ captured `wait --follow` active for your handle.
 a session restart, or ownership transfer. Bounded threads that will resolve in
 the current context do not need a separate handoff.
 
-Record these resume coordinates in the canonical handoff:
+Record these resume coordinates in canonical `HANDOFF.md`:
 
 - thread root, thread id, both handles, and current turn;
 - exact re-arm or probe command;
@@ -263,12 +263,14 @@ The next-action owner normally matches `meta.turn`, but a thread turn does not
 transfer ownership of another session's terminal or process. Record that
 operation separately unless the peer explicitly owns it.
 
-The thread transcript remains the evidence for what the peers said. The handoff
-connects that transcript to wider work state and tells the next agent how to
-resume. Do not use a checkpoint `note` as a substitute: notes are best-effort,
-do not wake a pending wait, and do not capture Git or external operations.
+The thread transcript remains the evidence for what the peers said.
+`HANDOFF.md` connects that transcript to wider work state and tells the next
+agent how to resume; `LOG.md` records pause, handback, reconciliation, and
+closure transitions. Do not use a checkpoint `note` as a substitute: notes are
+best-effort, do not wake a pending wait, and do not capture Git or external
+operations.
 
-On resume, reconcile the handoff against `status` or `sweep` before posting,
+On resume, reconcile `HANDOFF.md` against `status` or `sweep` before posting,
 rearming, or replacing an operation.
 
 ## Escalation - termination

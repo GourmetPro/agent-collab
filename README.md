@@ -28,16 +28,16 @@ transfer, compose it with `maintaining-continuous-handoffs`.
 
 ### `maintaining-continuous-handoffs`
 
-Keep one repository-local handoff current while work spans compaction, pauses,
-active operations, or ownership transfers. It separates a short mutable resume
-point from the append-only audit trail, reconciles recorded claims against real
-state, and keeps exactly one next action visible. Small same-turn tasks skip the
-handoff entirely.
+Keep a repository-local `HANDOFF.md`/`LOG.md` pair current while work spans
+compaction, pauses, active operations, or ownership transfers. `HANDOFF.md`
+contains mutable resume state; `LOG.md` contains append-only history. The skill
+reconciles recorded claims against real state and keeps exactly one next action
+visible. Small same-turn tasks skip the pair entirely.
 Invoke explicitly as `$maintaining-continuous-handoffs` in Codex or
 `/maintaining-continuous-handoffs` in Claude.
 
 - [SKILL.md](./skills/maintaining-continuous-handoffs/SKILL.md)
-- [Concrete handoff example](./skills/maintaining-continuous-handoffs/references/handoff-example.md)
+- [Concrete handoff pair example](./skills/maintaining-continuous-handoffs/references/handoff-example.md)
 
 ### `coordinating-parallel-sessions`
 
@@ -45,8 +45,8 @@ Coordinate N parallel agent sessions (Claude Code or Codex) from a single
 coordinator session - one session per independent, PR-sized workstream, each in
 its own git worktree and on its own `agent-thread` channel. The coordinator never
 writes the code: it scopes the streams, gates every step (plan, implement,
-review, UX-verify, PR, merge), composes the canonical continuous handoff with a
-parallel-stream overlay, and sequences merges to avoid shared-file conflicts.
+review, UX-verify, PR, merge), adds a parallel-stream overlay to the canonical
+`HANDOFF.md`/`LOG.md` pair, and sequences merges to avoid shared-file conflicts.
 Triggers when you fan a large effort across several long-lived sessions and want
 each gated and merged safely - the layer on top of `agent-thread`.
 Invoke explicitly as `$coordinating-parallel-sessions` in Codex or

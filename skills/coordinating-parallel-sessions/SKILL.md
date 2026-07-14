@@ -17,8 +17,8 @@ Coordinate N parallel agent sessions - one per workstream - from a single
 coordinator session: scope the streams, gate every step, sequence the merges.
 The coordinator NEVER writes the implementation. It sets up worktrees, threads,
 and specs; reviews and gates plan -> implement -> review -> UX -> PR -> merge;
-keeps the canonical handoff current; and merges in a safe order. Each stream
-runs in its own git worktree and talks to the coordinator over its own
+keeps the canonical handoff pair current; and merges in a safe order. Each
+stream runs in its own git worktree and talks to the coordinator over its own
 agent-thread channel.
 
 **REQUIRED SUB-SKILL:** Use agent-thread for the per-session channel - one
@@ -26,8 +26,9 @@ agent-thread channel.
 it; it assumes you already know the agent-thread wait/post loop.
 
 **REQUIRED SUB-SKILL:** Use maintaining-continuous-handoffs for the coordinator's
-canonical handoff and for any worker whose task may span compaction, a pause, or
-ownership transfer. This skill adds only the parallel-stream overlay.
+canonical `HANDOFF.md`/`LOG.md` pair and for any worker whose task may span
+compaction, a pause, or ownership transfer. This skill adds only the
+parallel-stream overlay to `HANDOFF.md`.
 
 ## Your job (in order)
 
@@ -41,9 +42,10 @@ ownership transfer. This skill adds only the parallel-stream overlay.
    a spec (a file per stream, or in-thread for a complex one). The USER launches
    each session in its worktree and pastes the kickoff - you never spawn them.
    See [Setup](#setup-per-stream).
-3. **Open the canonical handoff.** Use maintaining-continuous-handoffs, then add
-   the stream, thread/wait, dependency, merge/collision, gate, peer-coordinator,
-   and resource fields from `references/parallel-handoff-example.md`. See
+3. **Open the canonical handoff pair.** Use maintaining-continuous-handoffs,
+   then add the stream, thread/wait, dependency, merge/collision, gate,
+   peer-coordinator, and resource fields from
+   `references/parallel-handoff-example.md` to `HANDOFF.md`. See
    [The parallel handoff overlay](#the-parallel-handoff-overlay).
 4. **Gate each stream through the pipeline.** Plan -> implement -> review -> UX ->
    PR -> merge, with a real coordinator gate at each stage. See
@@ -60,7 +62,7 @@ ownership transfer. This skill adds only the parallel-stream overlay.
    user launches the sessions then leaves, also run the
    [Unattended runs](#unattended-runs) rules: workers never escalate (they route
    privileged commands to you), and each long-lived worker keeps its own
-   canonical handoff.
+   canonical handoff pair.
 8. **Resolve and tear down.** Resolve a thread only when its work is MERGED and
    signed off. Proactively kill idle dev servers and browsers. See
    [Resource coordination](#resource-coordination).
@@ -68,8 +70,9 @@ ownership transfer. This skill adds only the parallel-stream overlay.
 ## What you produce
 
 A set of independently reviewed, CI-green PRs merged into one base branch in a
-conflict-safe order, plus one canonical handoff whose parallel overlay makes
-every stream, wait, dependency, and merge decision resumable.
+conflict-safe order, plus one canonical `HANDOFF.md`/`LOG.md` pair whose current
+parallel overlay makes every stream, wait, dependency, and merge decision
+resumable.
 
 ## Router
 
@@ -78,7 +81,7 @@ Open only the section you need.
 | You are about to... | Read |
 |---|---|
 | Stand up the worktrees/threads/specs | [Setup](#setup-per-stream) |
-| Add coordination state to the canonical handoff | [The parallel handoff overlay](#the-parallel-handoff-overlay) + `references/parallel-handoff-example.md` |
+| Add coordination state to `HANDOFF.md` | [The parallel handoff overlay](#the-parallel-handoff-overlay) + `references/parallel-handoff-example.md` |
 | Run a stream through its gates | [The pipeline](#the-pipeline-gate-every-stream) |
 | Drive the agent-thread waits as a coordinator | [agent-thread discipline](#agent-thread-discipline-for-a-coordinator) |
 | Diagnose a quiet or stalled worker | [When the squad goes quiet](#when-the-squad-goes-quiet) |
@@ -111,11 +114,11 @@ one:
   (still the peer's turn; keep working), without the false-stall risk of a tiny
   `--timeout`.
 - **Own-handoff discipline.** Each worker expected to span compaction, a pause,
-  or ownership transfer uses maintaining-continuous-handoffs in its worktree.
-  Short worker tasks that finish in one context do not create one.
+  or ownership transfer uses the maintaining-continuous-handoffs pair in its
+  worktree. Short worker tasks that finish in one context do not create one.
 - **For unattended runs, the no-escalation rule** (see
   [Unattended runs](#unattended-runs)) goes in the kickoff and as the first
-  binding decision in the worker's handoff, so it survives compaction.
+  binding decision in the worker's `HANDOFF.md`, so it survives compaction.
 
 ## The pipeline (gate every stream)
 
@@ -144,9 +147,9 @@ Rules that make the gates real:
 
 ## The parallel handoff overlay
 
-Use maintaining-continuous-handoffs for creation, transition updates,
+Use maintaining-continuous-handoffs for pair creation, transition updates,
 reconciliation, evidence state, ownership transfer, and closure. Add only the
-coordination fields that another coordinator needs:
+current coordination fields that another coordinator needs to `HANDOFF.md`:
 
 - one stream row per worker: owner, worktree, branch/commit, dirty state, thread
   turn, phase, handback state, and one stream-specific next action;
@@ -288,9 +291,9 @@ fragile to reliable; put both in every worker kickoff.
   returns the output. Expect inbound "please run X" posts and be ready to be the
   fleet's hands for anything needing real permissions.
 - **Each long-lived worker uses maintaining-continuous-handoffs** in its
-  worktree. Record the no-escalation rule as the first binding decision, along
-  with the exact coordinator handle and handback channel. This keeps the rule in
-  the mutable resume section without inventing a second handoff format.
+  worktree. Record the no-escalation rule as the first binding decision in
+  `HANDOFF.md`, along with the exact coordinator handle and handback channel.
+  This keeps the rule in current state without inventing a second format.
 
 - **Deliver these rules via the kickoff post, not a note.** A note does not wake
   a parked `wait` and a Codex worker will not sweep it, so a note is the wrong

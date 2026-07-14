@@ -1,7 +1,9 @@
-# Continuous handoff example
+# Continuous handoff pair example
 
 Adapt this concrete example to the current effort. Keep the headings and replace
 the sample state; do not retain facts that were not verified.
+
+# `HANDOFF.md`
 
 ## READ THIS FIRST
 
@@ -49,7 +51,9 @@ the sample state; do not retain facts that were not verified.
   `/catalog` and incorporating the review handback.
 - **Optional:** None.
 
-## APPEND-ONLY LOG
+# `LOG.md`
+
+Entries are append-only and remain oldest to newest.
 
 ### 2026-07-14 18:42:11 JST — user correction superseded route removal
 
@@ -57,4 +61,3 @@ the sample state; do not retain facts that were not verified.
 - Marked focused tests and active build non-final because they use the previous
   removal decision.
 - Review remains on the old decision until the correction is sent.
-- Next action is to send the corrected invariant to `reviewer-ui`.

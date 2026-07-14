@@ -1,7 +1,7 @@
 # Maintaining Continuous Handoffs Skill Design
 
 Date: 2026-07-14
-Status: Approved for implementation planning
+Status: Implemented
 
 ## Context
 
@@ -23,7 +23,7 @@ not belong in this coordination repository.
 
 1. Add a directly invocable and auto-discoverable
    `maintaining-continuous-handoffs` skill.
-2. Define a compact mutable resume contract plus an append-only audit trail.
+2. Define a compact mutable `HANDOFF.md` plus a sibling append-only `LOG.md`.
 3. Make handoffs reconcile against real Git, process, thread, and deployment
    state instead of becoming a competing source of truth.
 4. Compose the new skill with persistent `agent-thread` sessions and
@@ -48,7 +48,7 @@ domain-specific overlays.
 
 | Skill | Continuity responsibility |
 |---|---|
-| `maintaining-continuous-handoffs` | Decide when a handoff is warranted; create, update, resume, reconcile, and close it. |
+| `maintaining-continuous-handoffs` | Decide when a handoff is warranted; create, update, resume, reconcile, and close the handoff pair. |
 | `agent-thread` | For persistent sessions only, record the thread root, ID, handles, turn, wait command, and resolve condition in the handoff. The transcript remains the conversation evidence. |
 | `coordinating-parallel-sessions` | Record stream ownership, worktrees, branches, thread IDs, waits, collision sets, merge order, canonical gates, peer coordinators, and resource policy. |
 
@@ -63,8 +63,9 @@ only, begins with `Use when`, and does not summarize the workflow.
 The skill opens with this six-step job:
 
 1. Decide whether durable continuity is needed.
-2. Locate an existing repository-designated handoff or create one, defaulting
-   to `tmp/HANDOFF.md` when local instructions do not specify another path.
+2. Locate an existing repository-designated handoff pair or create one,
+   defaulting to `tmp/HANDOFF.md` and `tmp/LOG.md` when local instructions do
+   not specify other paths.
 3. Reconcile the mutable summary against actual state before acting.
 4. Update the mutable summary and append a timestamped log entry after every
    meaningful state change.
@@ -72,10 +73,14 @@ The skill opens with this six-step job:
    ownership transfer.
 6. Close with a terminal outcome and no ambiguous remaining action.
 
-It produces one repository-local continuity artifact. The default must be in an
-ignored temporary location unless local instructions require a tracked handoff.
+It produces two sibling repository-local continuity artifacts. The defaults
+must be in an ignored temporary location unless local instructions require
+tracked handoff files.
 
-## Handoff contract
+## `HANDOFF.md` contract
+
+`HANDOFF.md` contains current mutable state only. It never carries historical
+log entries.
 
 ### `READ THIS FIRST`
 
@@ -117,17 +122,19 @@ invalidates affected downstream evidence.
 Separate required blockers from optional ideas. Do not hide required work as a
 follow-up, and do not convert speculative improvements into current scope.
 
-### `APPEND-ONLY LOG`
+## `LOG.md` contract
 
-Append entries oldest to newest with full date, time, and timezone. Add an entry
-after a binding decision, correction, ownership change, handback, commit, gate
-verdict, evidence invalidation, active-process change, deployment, external
-mutation, blocker, or completion. Do not edit, reorder, or delete older entries.
-Routine commands and progress narration do not warrant entries.
+`LOG.md` contains the append-only chronology. Append entries oldest to newest
+with full date, time, and timezone after a binding decision, correction,
+ownership change, handback, commit, gate verdict, evidence invalidation,
+active-process change, deployment, external mutation, blocker, or completion.
+Do not edit, reorder, or delete older entries. Routine commands and progress
+narration do not warrant entries.
 
 ## Resume and stale-state behavior
 
-On resume, read `READ THIS FIRST` before exploring broadly. Then verify its
+On resume, read `HANDOFF.md` before exploring broadly. Read `LOG.md` only when
+historical context is needed for audit or reconciliation. Then verify current
 claims against the nearest authoritative state:
 
 - Git for branch, commit, and working-tree state;
@@ -135,16 +142,17 @@ claims against the nearest authoritative state:
 - the thread CLI for turn and resolution state;
 - CI or deployment providers for external run state.
 
-If reality differs, repair the mutable summary and append a reconciliation
-entry before continuing. Never duplicate an operation merely because the
+If reality differs, repair `HANDOFF.md` and append a reconciliation entry to
+`LOG.md` before continuing. Never duplicate an operation merely because the
 handoff says it was active but the original process has not yet been inspected.
 
 ## When not to use
 
 Do not create a handoff for a small task that can finish in the current context
 without an active wait, ownership transfer, or meaningful audit requirement.
-Do not create a second handoff when the repository already names an
-authoritative continuity artifact that can carry the required fields.
+Do not create a competing pair when the repository already names authoritative
+current-state and historical continuity files that can carry the required
+fields.
 
 ## Repository integration
 
@@ -217,6 +225,7 @@ With the new skill, a fresh agent must:
 - mark affected evidence stale after exact output changes;
 - avoid a handoff for the small-task counterexample;
 - compose with persistent threads and parallel coordination;
+- keep current state in `HANDOFF.md` and history in `LOG.md`;
 - avoid copying generic guidance back into the existing skills.
 
 ### Repository checks
@@ -235,8 +244,8 @@ For each changed skill:
 
 ## Acceptance criteria
 
-The work is complete when the new skill passes its evaluations, the two existing
-skills use it only at their proper trigger boundaries, the parallel handoff
-reference contains only the specialized overlay, documentation links resolve,
-the existing CLI tests pass, and the final diff contains no project-specific
-Astro-blog guidance.
+The work is complete when the new skill passes its evaluations, produces the
+`HANDOFF.md`/`LOG.md` pair, the two existing skills use it only at their proper
+trigger boundaries, the parallel handoff reference contains only the specialized
+overlay, documentation links resolve, the existing CLI tests pass, and the final
+diff contains no project-specific Astro-blog guidance.

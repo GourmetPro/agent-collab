@@ -11,20 +11,22 @@ description: >
 
 # maintaining-continuous-handoffs
 
-Maintain one durable handoff that makes interrupted work safe to resume.
+Maintain one durable handoff pair that makes interrupted work safe to resume.
 
 ## Your job
 
 1. **Check that a handoff is warranted.** Use one for long-running, paused,
    multi-owner, or compaction-prone work. Skip it for a task that will finish in
    the current turn without an active wait or ownership transfer.
-2. **Choose one canonical file.** Follow repository instructions or reuse the
-   existing handoff. Otherwise use the repository's ignored temporary area,
-   conventionally `tmp/HANDOFF.md`. Do not create competing handoffs.
+2. **Choose one canonical pair.** Follow repository instructions or reuse the
+   existing files. Otherwise use the repository's ignored temporary area,
+   conventionally `tmp/HANDOFF.md` and `tmp/LOG.md`. Do not create competing
+   pairs.
 3. **Reconcile before acting.** Compare the handoff with actual Git, process,
    thread, CI, or deployment state. Repair stale current state before resuming.
-4. **Update on meaningful transitions.** Rewrite the short mutable summary,
-   then append one timestamped audit entry. Do not log routine commands.
+4. **Update on meaningful transitions.** Rewrite current state in `HANDOFF.md`,
+   then append one timestamped audit entry to `LOG.md`. Do not log routine
+   commands.
 5. **Resume from one exact action.** Name the action and owner. Inspect an
    existing operation before replacing or duplicating it.
 6. **Close terminally.** Record the final outcome and evidence, clear active
@@ -32,12 +34,12 @@ Maintain one durable handoff that makes interrupted work safe to resume.
 
 ## What you produce
 
-Produce one repository-local handoff with a short mutable `READ THIS FIRST`
-section and an oldest-to-newest `APPEND-ONLY LOG`. Use
+Produce two sibling repository-local files: mutable current state in
+`HANDOFF.md` and oldest-to-newest history in append-only `LOG.md`. Use
 [`references/handoff-example.md`](references/handoff-example.md) as the concrete
 shape, adapting its sample values to the current work.
 
-The handoff is a navigation artifact, not evidence. Git, the live process,
+The handoff pair is a navigation artifact, not evidence. Git, the live process,
 thread metadata, CI, and deployment providers remain authoritative.
 
 ## Router
@@ -48,22 +50,30 @@ thread metadata, CI, and deployment providers remain authoritative.
 | A decision, owner, process, or gate changed | [Record a transition](#record-a-transition) |
 | Context compacted or another owner resumed | [Resume and reconcile](#resume-and-reconcile) |
 | A worker hands work back | [Transfer ownership](#transfer-ownership) |
+| Historical context is needed | [Maintain `LOG.md`](#maintain-logmd) |
 | Work reached a terminal outcome | [Close the handoff](#close-the-handoff) |
 | Need the complete file shape | [`references/handoff-example.md`](references/handoff-example.md) |
 
 ## Create or adopt the handoff
 
-Use paths in this order:
+Use sibling paths in this order:
 
-1. the path named by repository instructions;
-2. the existing handoff for this effort;
-3. an ignored repository-local temporary path such as `tmp/HANDOFF.md`.
+1. the `HANDOFF.md` and `LOG.md` paths named by repository instructions;
+2. the existing pair for this effort;
+3. ignored repository-local paths such as `tmp/HANDOFF.md` and `tmp/LOG.md`.
+
+If repository instructions name only `HANDOFF.md`, place `LOG.md` beside it
+unless those instructions designate another history path.
 
 If no ignored location exists, ask before introducing a tracked or persistent
 artifact outside the repository's conventions. Never overwrite an unrelated
-handoff.
+pair.
 
-Create these sections:
+When adopting a legacy combined handoff, move its historical entries verbatim
+and in order to `LOG.md`, then leave only current state in `HANDOFF.md`. This is
+a one-time split; after it, never rewrite earlier `LOG.md` entries.
+
+Create these sections in `HANDOFF.md`:
 
 ### `READ THIS FIRST`
 
@@ -85,7 +95,7 @@ the skill's path, the agent's current directory, or a sample value.
 ### `DECISIONS`
 
 List decisions that still govern the work. When a decision changes, replace the
-current value here and record the supersession in the log. Mark evidence based
+current value here and record the supersession in `LOG.md`. Mark evidence based
 on the old decision stale.
 
 ### `OWNERSHIP AND ACTIVE OPERATIONS`
@@ -107,10 +117,13 @@ decision invalidates them.
 Separate required blockers from optional ideas. Do not hide required completion
 work in follow-up language.
 
-### `APPEND-ONLY LOG`
+## Maintain `LOG.md`
 
-Append full `YYYY-MM-DD HH:MM:SS TZ` entries oldest to newest. Never edit,
-reorder, or delete earlier entries.
+Keep history out of `HANDOFF.md`. Append full `YYYY-MM-DD HH:MM:SS TZ` entries
+to `LOG.md`, oldest to newest. Never edit, reorder, or delete earlier entries.
+Each entry states only an observed transition and its evidence. Keep current or
+future actions in `HANDOFF.md`, even when an action follows directly from the
+logged event.
 
 ## Record a transition
 
@@ -127,9 +140,8 @@ Update after a meaningful change:
 Perform the update in this order:
 
 1. Inspect the nearest authoritative state.
-2. Rewrite `READ THIS FIRST` and the affected current section.
-3. Append one log entry stating what changed, the observed evidence, and the new
-   next action.
+2. Rewrite `HANDOFF.md` current state.
+3. Append one `LOG.md` entry stating what changed and the observed evidence.
 
 Log only observations and actions already completed. Put future work in the one
 next action or required follow-ups. Do not append entries for every command,
@@ -137,11 +149,12 @@ poll, or progress message.
 
 ## Resume and reconcile
 
-1. Read `READ THIS FIRST` before broad repository exploration.
+1. Read `HANDOFF.md` before broad repository exploration. Read `LOG.md` only
+   when audit or reconciliation needs historical context.
 2. Verify its claims against the nearest authority.
 3. Preserve unexplained dirty work and external state.
-4. If any claim drifted, update the mutable sections and append a reconciliation
-   entry without inventing a cause.
+4. If any claim drifted, update `HANDOFF.md` and append a reconciliation entry
+   to `LOG.md` without inventing a cause.
 5. Execute the one exact next action.
 
 Never restart a quiet build, worker, CI run, or deployment until its recorded
@@ -157,14 +170,15 @@ The current writer records a handback state:
 
 Record changed paths, current commit or dirty state, checks actually run,
 active identifiers, limitations, and the single next action. The receiving
-owner verifies these claims before writing.
+owner verifies these claims before writing. Append the handback transition to
+`LOG.md`.
 
 ## Close the handoff
 
 Set status to the terminal outcome, clear active ownership and operation rows,
-record final evidence, and append the completion entry. State either that no
-required action remains or name the exact user-owned action that is outside the
-completed scope.
+and record final evidence in `HANDOFF.md`; append the completion entry to
+`LOG.md`. State either that no required action remains or name the exact
+user-owned action that is outside the completed scope.
 
 Do not claim completion when an implementation, verification, deployment, or
 handoff action required by the objective remains open.
@@ -172,8 +186,8 @@ handoff action required by the objective remains open.
 ## When NOT to use
 
 - A small task will finish in the current turn with no active wait or handback.
-- The repository already has one authoritative continuity artifact that can
-  carry the required state; update it instead of creating another.
+- The repository already has authoritative current-state and history files that
+  carry the required fields; adopt them instead of creating a competing pair.
 - You only need a conversation transcript. Use the collaboration channel's own
   transcript; add a handoff only when wider work must survive interruption.
 - You need a backlog or project history after the work ends. Use the project's
@@ -183,8 +197,10 @@ handoff action required by the objective remains open.
 
 | Mistake | Correction |
 |---|---|
-| Write a handoff only in chat | Save the canonical file at the recorded path. |
-| Keep only a long chronology | Maintain the short mutable resume section above it. |
+| Write a handoff only in chat | Save the canonical `HANDOFF.md`/`LOG.md` pair. |
+| Keep history inside `HANDOFF.md` | Move it verbatim to `LOG.md`; keep only current state in `HANDOFF.md`. |
+| Keep only a long chronology | Maintain current resume state separately in `HANDOFF.md`. |
+| Put an unperformed next action in `LOG.md` | Keep it only in `HANDOFF.md`; log it after it occurs. |
 | List several possible next steps | Choose one exact action and owner. |
 | Treat the handoff as authoritative | Reconcile against Git, processes, threads, CI, or deployments. |
 | Treat a persistent thread as the whole handoff | Keep the transcript there; record wider resume coordinates in the handoff. |
