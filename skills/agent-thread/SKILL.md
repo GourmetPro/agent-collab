@@ -1,18 +1,13 @@
 ---
 name: agent-thread
 description: >
-  Use when you want one running agent session to collaborate with another
-  running agent session (any mix of Claude Code and Codex, same machine) by
-  taking turns through a shared channel until the work is resolved - instead of
-  you manually copy-pasting messages or report files between the two. Covers
-  many collaboration shapes: have a peer review a spec/plan/PR, debate a
-  decision (A vs B), consult a peer that has different tools/model/repo/web
-  access, delegate a scoped sub-task, pair (driver/navigator) on a working
-  tree, or brainstorm. Triggers on asks like "have another agent review this",
-  "get a second agent's opinion until we converge", "ask the other session
-  about X", "let codex and claude work this out", "I asked an agent to do X,
-  they'll come back to you via Y", or wanting two open sessions to talk without
-  you relaying.
+  Use when two already-running agent sessions on the same machine need to
+  collaborate on a review, decision, consultation, delegated sub-task,
+  driver/navigator pairing, or brainstorm without the user relaying each turn.
+  Triggers on asks like "have another agent review this", "get a second agent's
+  opinion until we converge", "ask the other session about X", "let Codex and
+  Claude work this out", "pair these two sessions", or "keep this cross-agent
+  conversation open".
 user-invocable: true
 ---
 
@@ -246,6 +241,37 @@ turn; `resolve` only when the whole collaboration is done. Do not open a fresh
 thread (and re-paste a launcher) per topic - that ends the peer's loop. Do not
 leave a session thread after posting unless it has resolved or escalated; keep a
 captured `wait --follow` active for your handle.
+
+### Durable continuity for persistent sessions
+
+**REQUIRED SUB-SKILL:** Use `maintaining-continuous-handoffs` when an
+`init --session` collaboration may span context compaction, an overnight pause,
+a session restart, or ownership transfer. Bounded threads that will resolve in
+the current context do not need a separate handoff.
+
+Record these resume coordinates in canonical `HANDOFF.md`:
+
+- thread root, thread id, both handles, and current turn;
+- exact re-arm or probe command;
+- current topic and resolve condition;
+- related branch, worktree, owner, and active operation identifiers;
+- one exact next action.
+
+For any coordinate not supplied or inspected, record `Not yet verified`. Never
+derive the task worktree from the skill path or the agent's current directory.
+The next-action owner normally matches `meta.turn`, but a thread turn does not
+transfer ownership of another session's terminal or process. Record that
+operation separately unless the peer explicitly owns it.
+
+The thread transcript remains the evidence for what the peers said.
+`HANDOFF.md` connects that transcript to wider work state and tells the next
+agent how to resume; `LOG.md` records pause, handback, reconciliation, and
+closure transitions. Do not use a checkpoint `note` as a substitute: notes are
+best-effort, do not wake a pending wait, and do not capture Git or external
+operations.
+
+On resume, reconcile `HANDOFF.md` against `status` or `sweep` before posting,
+rearming, or replacing an operation.
 
 ## Escalation - termination
 

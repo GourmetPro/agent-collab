@@ -128,6 +128,27 @@ indefinitely-open terminal is not independently resumable across sleep/cleanup.
 A "lobby" thread (peer awaits the next thread after a resolve) was considered and
 deferred - a persistent thread with explicit resolve covers the need.
 
+### Continuity boundary
+
+The thread is the authoritative transcript and turn state, but it is not the
+whole continuity record for a long task. When a persistent session may span
+compaction, an overnight pause, restart, or ownership transfer, use the
+`maintaining-continuous-handoffs` skill. `HANDOFF.md` records the thread root,
+id, handles, turn, exact re-arm command, current topic, resolve condition, and
+the related Git or active-operation state. `LOG.md` records the append-only
+pause, handback, reconciliation, and closure history. On resume, reconcile the
+current coordinates against `status` or `sweep` before acting.
+
+Unknown coordinates stay explicitly unverified; the skill's install path or the
+agent's current directory is not evidence of the task worktree. Thread-turn
+ownership also does not imply ownership of another session's terminal or
+process.
+
+Bounded collaborations that resolve in the current context do not need a second
+artifact. This keeps routine review threads lightweight while preventing a
+thread transcript or best-effort note from being mistaken for the wider task's
+resume point.
+
 ## Anytime notes
 
 Strict turn-taking muted the waiting side until the peer replied. `note` adds an
